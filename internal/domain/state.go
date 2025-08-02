@@ -27,6 +27,28 @@ const (
 
 	// KeyVerdict stores the final verdict from aggregation.
 	KeyVerdict StateKey = "verdict"
+
+	// Execution context keys for tracking metadata across graph traversal.
+
+	// KeyGraphID stores the unique identifier of the evaluation graph
+	// being executed, used for tracking and observability.
+	KeyGraphID StateKey = "execution.graph_id"
+
+	// KeyEvaluationType stores the type of evaluation being performed
+	// (e.g., "comparison", "scoring", "classification").
+	KeyEvaluationType StateKey = "execution.evaluation_type"
+
+	// KeyExecutionID stores a unique identifier for this specific
+	// execution instance, useful for tracing and correlation.
+	KeyExecutionID StateKey = "execution.execution_id"
+
+	// KeyBudgetTokensUsed tracks cumulative token consumption across
+	// the entire graph execution for budget management.
+	KeyBudgetTokensUsed StateKey = "execution.budget.tokens_used"
+
+	// KeyBudgetCallsMade tracks cumulative API calls made across
+	// the entire graph execution for budget management.
+	KeyBudgetCallsMade StateKey = "execution.budget.calls_made"
 )
 
 // deepCopyValue creates a deep copy of a value to ensure true immutability.
@@ -338,4 +360,105 @@ func (s State) Keys() []StateKey {
 // It includes all key-value pairs in a readable format.
 func (s State) String() string {
 	return fmt.Sprintf("State%v", s.data)
+}
+
+// ExecutionContext contains metadata about the current evaluation execution
+// that flows through the State during graph traversal.
+// It provides consistent access to execution metadata for middleware,
+// metrics collection, and observability.
+type ExecutionContext struct {
+	// GraphID is the unique identifier of the evaluation graph being executed.
+	GraphID string
+
+	// EvaluationType describes the type of evaluation being performed
+	// (e.g., "comparison", "scoring", "classification").
+	EvaluationType string
+
+	// ExecutionID is a unique identifier for this specific execution instance,
+	// useful for tracing and correlation across distributed systems.
+	ExecutionID string
+}
+
+// WithExecutionContext creates a new State with execution context metadata
+// included, enabling proper tracking and observability throughout graph execution.
+// This method should be called at the beginning of graph execution to establish
+// the execution context for all subsequent middleware and units.
+func (s State) WithExecutionContext(ctx ExecutionContext) State {
+	updates := map[StateKey]any{
+		KeyGraphID:        ctx.GraphID,
+		KeyEvaluationType: ctx.EvaluationType,
+		KeyExecutionID:    ctx.ExecutionID,
+		// Initialize budget counters to zero for new execution
+		KeyBudgetTokensUsed: 0,
+		KeyBudgetCallsMade:  0,
+	}
+	return s.WithMultiple(updates)
+}
+
+// GetExecutionContext extracts execution context metadata from the State.
+// It returns the execution context and a boolean indicating whether all
+// required context fields are present and valid.
+// This method is used by middleware and observability components to access
+// execution metadata.
+func (s State) GetExecutionContext() (ExecutionContext, bool) {
+	graphID, ok1 := s.GetString(KeyGraphID)
+	if !ok1 {
+		return ExecutionContext{}, false
+	}
+
+	evaluationType, ok2 := s.GetString(KeyEvaluationType)
+	if !ok2 {
+		return ExecutionContext{}, false
+	}
+
+	executionID, ok3 := s.GetString(KeyExecutionID)
+	if !ok3 {
+		return ExecutionContext{}, false
+	}
+
+	return ExecutionContext{
+		GraphID:        graphID,
+		EvaluationType: evaluationType,
+		ExecutionID:    executionID,
+	}, true
+}
+
+// Usage tracks current resource consumption during evaluation.
+// It maintains counters for tokens used and API calls made.
+type Usage struct {
+	// Tokens represents the cumulative token consumption.
+	Tokens int64
+
+	// Calls represents the cumulative API call count.
+	Calls int64
+}
+
+// UpdateBudgetUsage creates a new State with updated budget consumption values.
+// This method provides atomic updates to budget tracking and should be used
+// by middleware components that track resource consumption during execution.
+// It increments the existing values rather than replacing them.
+func (s State) UpdateBudgetUsage(tokensUsed, callsMade int64) State {
+	// Get current values or default to 0
+	currentTokens, _ := s.GetInt64(KeyBudgetTokensUsed)
+	currentCalls, _ := s.GetInt64(KeyBudgetCallsMade)
+
+	updates := map[StateKey]any{
+		KeyBudgetTokensUsed: currentTokens + tokensUsed,
+		KeyBudgetCallsMade:  currentCalls + callsMade,
+	}
+	return s.WithMultiple(updates)
+}
+
+// GetBudgetUsage retrieves the current budget consumption from the State.
+// It returns a Usage struct containing cumulative resource consumption.
+// This method enables middleware and monitoring components to access
+// current resource consumption levels.
+func (s State) GetBudgetUsage() Usage {
+	tokens, _ := s.GetInt64(KeyBudgetTokensUsed)
+	calls, _ := s.GetInt64(KeyBudgetCallsMade)
+
+	return Usage{
+		Tokens: tokens,
+		Calls:  calls,
+	}
 }

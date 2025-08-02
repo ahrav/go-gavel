@@ -26,6 +26,25 @@ type LLMClient interface {
 	//   - "model": string (specific model version)
 	Complete(ctx context.Context, prompt string, options map[string]any) (string, error)
 
+	// CompleteWithUsage sends a completion request to the LLM provider and
+	// returns detailed token usage information for budget tracking.
+	// It returns the generated text along with input and output token counts.
+	// The implementation should handle rate limiting, retries, and timeouts.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and deadline propagation
+	//   - prompt: The input prompt for the LLM
+	//   - options: Provider-specific options (temperature, max tokens, etc.)
+	//
+	// Returns:
+	//   - output: The generated text response
+	//   - tokensIn: Number of tokens in the input prompt
+	//   - tokensOut: Number of tokens in the generated output
+	//   - error: Any error encountered during the request
+	//
+	// This method is essential for budget management and cost tracking.
+	CompleteWithUsage(ctx context.Context, prompt string, options map[string]any) (output string, tokensIn, tokensOut int, err error)
+
 	// EstimateTokens calculates the approximate token count for a given text.
 	// This is useful for cost estimation and staying within model limits.
 	// The estimation method may vary by provider.

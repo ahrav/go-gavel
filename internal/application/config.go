@@ -75,13 +75,13 @@ type UnitConfig struct {
 type BudgetConfig struct {
 	// MaxTokens limits the total number of tokens that can be consumed
 	// by this unit, preventing excessive API usage in language model calls.
-	MaxTokens int `yaml:"max_tokens" validate:"omitempty,min=1,max=1000000"`
+	MaxTokens int64 `yaml:"max_tokens" validate:"omitempty,min=1,max=1000000"`
 	// MaxCost sets the maximum monetary cost in dollars that this unit
 	// is allowed to incur, providing cost control for expensive operations.
 	MaxCost float64 `yaml:"max_cost" validate:"omitempty,min=0,max=10000"`
-	// MaxRetries limits the number of retry attempts for failed operations,
-	// working in conjunction with the retry configuration settings.
-	MaxRetries int `yaml:"max_retries" validate:"omitempty,min=0,max=10"`
+	// MaxCalls limits the number of API calls that can be made by this unit,
+	// providing direct control over API usage and associated costs.
+	MaxCalls int64 `yaml:"max_calls" validate:"omitempty,min=0,max=1000"`
 	// TimeoutSeconds specifies the maximum execution time in seconds
 	// before the unit is forcibly terminated to prevent resource exhaustion.
 	TimeoutSeconds int `yaml:"timeout_seconds" validate:"omitempty,min=1,max=3600"`

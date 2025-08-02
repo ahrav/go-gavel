@@ -136,6 +136,42 @@ func (m *MockLLMClient) Complete(ctx context.Context, prompt string, options map
 	return response, nil
 }
 
+// CompleteWithUsage implements the LLMClient.CompleteWithUsage method with
+// deterministic responses and accurate token counting for budget tracking.
+// It provides the same response selection as Complete but includes detailed
+// token usage information for input and output.
+func (m *MockLLMClient) CompleteWithUsage(ctx context.Context, prompt string, options map[string]any) (output string, tokensIn, tokensOut int, err error) {
+	if ctx.Err() != nil {
+		return "", 0, 0, ctx.Err()
+	}
+
+	if prompt == "" {
+		return "", 0, 0, fmt.Errorf("prompt cannot be empty")
+	}
+
+	// Calculate input tokens
+	tokensIn, err = m.EstimateTokens(prompt)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("failed to estimate input tokens: %w", err)
+	}
+
+	// Find the best matching response pattern
+	response := m.findMatchingResponse(prompt)
+
+	// Apply temperature variation if specified in options
+	if temp, ok := options["temperature"].(float64); ok && temp > 0.5 {
+		response = m.addVariation(response, prompt)
+	}
+
+	// Calculate output tokens
+	tokensOut, err = m.EstimateTokens(response)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("failed to estimate output tokens: %w", err)
+	}
+
+	return response, tokensIn, tokensOut, nil
+}
+
 // EstimateTokens implements the LLMClient.EstimateTokens method using
 // a simple estimation algorithm based on text length.
 // This provides realistic token estimates for budget tracking and validation.

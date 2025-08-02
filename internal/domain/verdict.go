@@ -87,3 +87,20 @@ type Verdict struct {
 	// Timestamp records when this verdict was created.
 	Timestamp time.Time `json:"timestamp"`
 }
+
+// ErrorVerdict represents a verdict that indicates an error occurred
+// during evaluation execution, such as budget exceeded or system failure.
+// It provides clear error information while preserving trace context.
+type ErrorVerdict struct {
+	// ID uniquely identifies this verdict (typically a UUID).
+	ID string `json:"id"`
+
+	// Error contains the error message describing what went wrong.
+	Error string `json:"error"`
+
+	// TraceID preserves the distributed trace identifier for debugging.
+	TraceID string `json:"trace_id"`
+
+	// Timestamp records when this error verdict was created.
+	Timestamp time.Time `json:"timestamp"`
+}

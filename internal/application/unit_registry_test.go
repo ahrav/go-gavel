@@ -26,6 +26,13 @@ func (m *mockLLMClient) Complete(ctx context.Context, prompt string, options map
 	return "mock response", nil
 }
 
+func (m *mockLLMClient) CompleteWithUsage(ctx context.Context, prompt string, options map[string]any) (output string, tokensIn, tokensOut int, err error) {
+	tokensIn, _ = m.EstimateTokens(prompt)
+	output = "mock response"
+	tokensOut, _ = m.EstimateTokens(output)
+	return output, tokensIn, tokensOut, nil
+}
+
 func (m *mockLLMClient) EstimateTokens(text string) (int, error) {
 	return len(text), nil
 }

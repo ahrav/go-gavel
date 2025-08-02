@@ -320,7 +320,6 @@ func TestBudgetConfig_Validation(t *testing.T) {
 			budget: BudgetConfig{
 				MaxTokens:      10000,
 				MaxCost:        100.0,
-				MaxRetries:     3,
 				TimeoutSeconds: 60,
 			},
 			wantErr: false,
