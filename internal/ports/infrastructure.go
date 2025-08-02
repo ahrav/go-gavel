@@ -112,3 +112,37 @@ type ConfigLoader interface {
 	//	defer stop()
 	Watch(ctx context.Context, config any, callback func(any)) (stop func(), err error)
 }
+
+// UnitRegistry defines the interface for creating and managing evaluation units.
+// It acts as a factory for different unit types based on configuration.
+type UnitRegistry interface {
+	// CreateUnit creates a new unit instance based on the provided type and configuration.
+	// The configuration is unit-type specific and will be validated by the implementation.
+	//
+	// Parameters:
+	//   - unitType: The type of unit to create (e.g., "llm_judge", "code_analyzer")
+	//   - id: Unique identifier for the unit instance
+	//   - config: Unit-specific configuration as a map
+	//
+	// Returns:
+	//   - Unit: The created unit instance
+	//   - error: Any error encountered during creation
+	CreateUnit(unitType string, id string, config map[string]any) (Unit, error)
+
+	// RegisterUnitFactory registers a factory function for a specific unit type.
+	// This allows for extensibility by adding new unit types at runtime.
+	//
+	// Parameters:
+	//   - unitType: The type identifier for the unit
+	//   - factory: Function that creates instances of this unit type
+	RegisterUnitFactory(unitType string, factory UnitFactory) error
+
+	// GetSupportedTypes returns a list of all registered unit types.
+	// This is useful for validation and documentation purposes.
+	GetSupportedTypes() []string
+}
+
+// UnitFactory is a function type for creating unit instances.
+// Each unit type should have its own factory function that handles
+// type-specific configuration and initialization.
+type UnitFactory func(id string, config map[string]any) (Unit, error)
