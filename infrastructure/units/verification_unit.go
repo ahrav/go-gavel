@@ -6,15 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand/v2"
 	"strconv"
 	"strings"
 	"text/template"
-	"time"
 
 	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
 
+	"github.com/ahrav/go-gavel/infrastructure/llm"
 	"github.com/ahrav/go-gavel/internal/domain"
 	"github.com/ahrav/go-gavel/internal/ports"
 )
@@ -26,10 +25,6 @@ const (
 	DefaultVerificationMaxTokens     = 512
 	DefaultVerificationTemperature   = 0.0
 	DefaultVerificationConfThreshold = 0.8
-	MaxRetryAttempts                 = 3
-	BaseRetryDelay                   = 1 * time.Second
-	MaxRetryDelay                    = 30 * time.Second
-	RetryJitterPercentage            = 0.1
 )
 
 // VerificationUnit performs a final critique of judging results to validate
@@ -164,14 +159,20 @@ func NewVerificationUnit(
 		return nil, fmt.Errorf("unit name cannot be empty")
 	}
 
+	if llmClient == nil {
+		return nil, fmt.Errorf("unit %s: LLM client cannot be nil", name)
+	}
+
+	retryClient := llm.NewRetryingLLMClient(llmClient, llm.DefaultRetryConfig())
+
 	unit := &VerificationUnit{
 		name:      name,
 		config:    config,
-		llmClient: llmClient,
+		llmClient: retryClient,
 		validator: validator.New(),
 	}
 
-	tmpl, err := unit.validateAndCompileConfig(config, llmClient, name)
+	tmpl, err := unit.validateAndCompileConfig(config, retryClient, name)
 	if err != nil {
 		return nil, err
 	}
@@ -368,46 +369,7 @@ func (vu *VerificationUnit) truncateAnswersIfNeeded(
 	return truncatedAnswers
 }
 
-// isRetryableError determines if an error is likely transient and worth retrying.
-func (vu *VerificationUnit) isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	retryablePatterns := []string{
-		"rate limit", "too many requests", "timeout", "connection refused",
-		"connection reset", "temporary failure", "service unavailable",
-		"internal server error", "bad gateway", "gateway timeout", "network",
-	}
-	for _, pattern := range retryablePatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-// calculateRetryDelay calculates the delay for exponential backoff with jitter.
-func (vu *VerificationUnit) calculateRetryDelay(attempt int) time.Duration {
-	delay := BaseRetryDelay * time.Duration(1<<attempt)
-	if delay > MaxRetryDelay {
-		delay = MaxRetryDelay
-	}
-
-	// Add jitter to prevent thundering herd.
-	jitter := int64(float64(delay) * RetryJitterPercentage)
-	if jitter > 0 {
-		//nolint:gosec // G404: math/rand is acceptable for retry jitter timing
-		delay += time.Duration(rand.Int64N(2*jitter) - jitter)
-	}
-
-	if delay < 0 {
-		return BaseRetryDelay
-	}
-	return delay
-}
-
-// callVerificationLLM invokes the LLM with retry logic.
+// callVerificationLLM invokes the LLM (retry logic is handled by the RetryingLLMClient middleware).
 func (vu *VerificationUnit) callVerificationLLM(ctx context.Context, prompt string) (string, int, int, error) {
 	promptTokens := vu.estimateTokens(prompt)
 	contextLimit := vu.getModelContextLimit()
@@ -424,23 +386,8 @@ func (vu *VerificationUnit) callVerificationLLM(ctx context.Context, prompt stri
 		options["response_format"] = map[string]string{"type": "json_object"}
 	}
 
-	var lastErr error
-	for attempt := 0; attempt <= MaxRetryAttempts; attempt++ {
-		response, tokensIn, tokensOut, err := vu.llmClient.CompleteWithUsage(ctx, prompt, options)
-		if err == nil {
-			return response, tokensIn, tokensOut, nil
-		}
-		lastErr = err
-		if attempt == MaxRetryAttempts || !vu.isRetryableError(err) {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return "", 0, 0, fmt.Errorf("unit %s: context cancelled during retry: %w", vu.name, ctx.Err())
-		case <-time.After(vu.calculateRetryDelay(attempt)):
-		}
-	}
-	return "", 0, 0, fmt.Errorf("unit %s: LLM call failed after %d attempts: %w", vu.name, MaxRetryAttempts+1, lastErr)
+	// The retry logic is now handled by the RetryingLLMClient middleware
+	return vu.llmClient.CompleteWithUsage(ctx, prompt, options)
 }
 
 // updateVerdictWithVerification updates the verdict based on verification results.

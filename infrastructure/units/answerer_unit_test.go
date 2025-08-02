@@ -401,11 +401,12 @@ func TestCreateAnswererUnit(t *testing.T) {
 	t.Run("handles type conversions", func(t *testing.T) {
 		config := map[string]any{
 			"llm_client":      mockLLMClient,
-			"num_answers":     "3",          // string
-			"temperature":     0,            // int
-			"max_tokens":      float64(250), // float64
-			"timeout":         30.0,         // float64 as seconds
-			"max_concurrency": "8",          // string
+			"num_answers":     "3",                          // string
+			"prompt":          "Test prompt: {{.Question}}", // required
+			"temperature":     0,                            // int
+			"max_tokens":      float64(250),                 // float64
+			"timeout":         "30s",                        // duration string
+			"max_concurrency": "8",                          // string
 		}
 
 		unit, err := CreateAnswererUnit("test_id", config)
@@ -417,19 +418,25 @@ func TestCreateAnswererUnit(t *testing.T) {
 		assert.Equal(t, 8, unit.config.MaxConcurrency)
 	})
 
-	t.Run("uses defaults for missing values", func(t *testing.T) {
+	t.Run("uses defaults for optional fields", func(t *testing.T) {
 		config := map[string]any{
-			"llm_client": mockLLMClient,
+			"llm_client":      mockLLMClient,
+			"num_answers":     2,                            // required
+			"prompt":          "Test prompt: {{.Question}}", // required
+			"max_tokens":      100,                          // required
+			"timeout":         "15s",                        // required
+			"max_concurrency": 3,                            // required
+			// temperature not provided, should use default
 		}
 
 		unit, err := CreateAnswererUnit("test_id", config)
 		require.NoError(t, err)
-		assert.Equal(t, 3, unit.config.NumAnswers)              // default
-		assert.Equal(t, 0.7, unit.config.Temperature)           // default
-		assert.Equal(t, 500, unit.config.MaxTokens)             // default
-		assert.Equal(t, 30*time.Second, unit.config.Timeout)    // default
-		assert.Equal(t, 5, unit.config.MaxConcurrency)          // default
-		assert.Contains(t, unit.config.Prompt, "comprehensive") // default prompt
+		assert.Equal(t, 2, unit.config.NumAnswers)                        // provided value
+		assert.Equal(t, 0.7, unit.config.Temperature)                     // default since not provided
+		assert.Equal(t, 100, unit.config.MaxTokens)                       // provided value
+		assert.Equal(t, 15*time.Second, unit.config.Timeout)              // provided value
+		assert.Equal(t, 3, unit.config.MaxConcurrency)                    // provided value
+		assert.Equal(t, "Test prompt: {{.Question}}", unit.config.Prompt) // provided value
 	})
 }
 

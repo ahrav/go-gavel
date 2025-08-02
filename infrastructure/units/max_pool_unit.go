@@ -1,3 +1,5 @@
+// Package units provides domain-specific evaluation units that implement
+// the ports.Unit interface for the go-gavel evaluation engine.
 package units
 
 import (
