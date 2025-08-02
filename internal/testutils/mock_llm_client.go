@@ -19,6 +19,10 @@ type MockLLMClient struct {
 	responses map[string]string
 	// tokenCounts maps response types to token usage estimates.
 	tokenCounts map[string]int
+	// overrideResponse is used to force a specific response regardless of prompt
+	overrideResponse string
+	// overrideError is used to force an error response
+	overrideError error
 }
 
 // MockResponse defines a pre-configured response pattern for the mock client.
@@ -120,17 +124,28 @@ func (m *MockLLMClient) Complete(ctx context.Context, prompt string, options map
 		return "", ctx.Err()
 	}
 
+	// Check for override error first
+	if m.overrideError != nil {
+		return "", m.overrideError
+	}
+
 	if prompt == "" {
 		return "", fmt.Errorf("prompt cannot be empty")
 	}
 
-	// Find the best matching response pattern.
-	response := m.findMatchingResponse(prompt)
+	// Check for override response
+	var response string
+	if m.overrideResponse != "" {
+		response = m.overrideResponse
+	} else {
+		// Find the best matching response pattern.
+		response = m.findMatchingResponse(prompt)
 
-	// Apply temperature variation if specified in options.
-	if temp, ok := options["temperature"].(float64); ok && temp > 0.5 {
-		// For higher temperatures, add slight variation (deterministic).
-		response = m.addVariation(response, prompt)
+		// Apply temperature variation if specified in options.
+		if temp, ok := options["temperature"].(float64); ok && temp > 0.5 {
+			// For higher temperatures, add slight variation (deterministic).
+			response = m.addVariation(response, prompt)
+		}
 	}
 
 	return response, nil
@@ -145,6 +160,11 @@ func (m *MockLLMClient) CompleteWithUsage(ctx context.Context, prompt string, op
 		return "", 0, 0, ctx.Err()
 	}
 
+	// Check for override error first
+	if m.overrideError != nil {
+		return "", 0, 0, m.overrideError
+	}
+
 	if prompt == "" {
 		return "", 0, 0, fmt.Errorf("prompt cannot be empty")
 	}
@@ -155,12 +175,18 @@ func (m *MockLLMClient) CompleteWithUsage(ctx context.Context, prompt string, op
 		return "", 0, 0, fmt.Errorf("failed to estimate input tokens: %w", err)
 	}
 
-	// Find the best matching response pattern
-	response := m.findMatchingResponse(prompt)
+	// Check for override response
+	var response string
+	if m.overrideResponse != "" {
+		response = m.overrideResponse
+	} else {
+		// Find the best matching response pattern
+		response = m.findMatchingResponse(prompt)
 
-	// Apply temperature variation if specified in options
-	if temp, ok := options["temperature"].(float64); ok && temp > 0.5 {
-		response = m.addVariation(response, prompt)
+		// Apply temperature variation if specified in options
+		if temp, ok := options["temperature"].(float64); ok && temp > 0.5 {
+			response = m.addVariation(response, prompt)
+		}
 	}
 
 	// Calculate output tokens
@@ -297,6 +323,8 @@ func (m *MockLLMClient) GetTokenUsage(pattern string) int {
 func (m *MockLLMClient) Reset() {
 	m.responses = make(map[string]string)
 	m.tokenCounts = make(map[string]int)
+	m.overrideResponse = ""
+	m.overrideError = nil
 	m.setupDefaultResponses()
 }
 
@@ -304,6 +332,18 @@ func (m *MockLLMClient) Reset() {
 // This allows testing with different model configurations.
 func (m *MockLLMClient) SetModel(model string) {
 	m.model = model
+}
+
+// SetResponse sets a specific response that will be returned for all prompts.
+// This overrides pattern-based matching for testing specific scenarios.
+func (m *MockLLMClient) SetResponse(response string) {
+	m.overrideResponse = response
+}
+
+// SetError sets a specific error that will be returned for all prompts.
+// This is useful for testing error handling paths.
+func (m *MockLLMClient) SetError(err error) {
+	m.overrideError = err
 }
 
 // Verify interface compliance at compile time.

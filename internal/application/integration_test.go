@@ -54,18 +54,15 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 		// Step 1: Start with initial state containing a question.
 		initialState := domain.NewState()
 		question := "What are the key benefits of using microservices architecture?"
-		initialState = initialState.With(domain.KeyQuestion, question)
+		initialState = domain.With(initialState, domain.KeyQuestion, question)
 
 		// Step 2: Generate candidate answers.
 		stateWithAnswers, err := answererUnit.Execute(ctx, initialState)
 		require.NoError(t, err)
 
 		// Verify answers were generated.
-		answersRaw, ok := stateWithAnswers.Get(domain.KeyAnswers)
+		answers, ok := domain.Get(stateWithAnswers, domain.KeyAnswers)
 		require.True(t, ok, "Answers should be present in state")
-
-		answers, ok := answersRaw.([]domain.Answer)
-		require.True(t, ok, "Answers should be of correct type")
 		require.Len(t, answers, 3, "Should generate 3 answers as configured")
 
 		// Verify answer structure.
@@ -80,11 +77,8 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify scores were generated.
-		scoresRaw, ok := stateWithScores.Get(domain.KeyJudgeScores)
+		judgeSummaries, ok := domain.Get(stateWithScores, domain.KeyJudgeScores)
 		require.True(t, ok, "Judge scores should be present in state")
-
-		judgeSummaries, ok := scoresRaw.([]domain.JudgeSummary)
-		require.True(t, ok, "Judge scores should be of correct type")
 		require.Len(t, judgeSummaries, 3, "Should have scores for all 3 answers")
 
 		// Verify score structure and requirements.
@@ -100,11 +94,9 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify verdict was generated.
-		verdictRaw, ok := finalState.Get("verdict")
+		verdict, ok := domain.Get(finalState, domain.KeyVerdict)
 		require.True(t, ok, "Verdict should be present in final state")
-
-		verdict, ok := verdictRaw.(domain.Verdict)
-		require.True(t, ok, "Verdict should be of correct type")
+		require.NotNil(t, verdict, "Verdict should not be nil")
 
 		// Verify verdict structure.
 		assert.NotEmpty(t, verdict.ID, "Verdict should have non-empty ID")
@@ -139,7 +131,7 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 	t.Run("pipeline handles edge cases", func(t *testing.T) {
 		// Test with a very short question.
 		shortState := domain.NewState()
-		shortState = shortState.With(domain.KeyQuestion, "Why?")
+		shortState = domain.With(shortState, domain.KeyQuestion, "Why?")
 
 		// Pipeline should still work with short inputs.
 		stateAfterAnswers, err := answererUnit.Execute(ctx, shortState)
@@ -152,14 +144,14 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify final verdict exists.
-		_, ok := finalState.Get("verdict")
+		_, ok := domain.Get(finalState, domain.KeyVerdict)
 		assert.True(t, ok, "Should produce verdict even for short questions")
 	})
 
 	t.Run("pipeline maintains state immutability", func(t *testing.T) {
 		// Test that original state is not modified.
 		originalState := domain.NewState()
-		originalState = originalState.With(domain.KeyQuestion, "Test question")
+		originalState = domain.With(originalState, domain.KeyQuestion, "Test question")
 
 		// Store original keys for comparison.
 		originalKeys := originalState.Keys()
@@ -268,7 +260,7 @@ func TestUnitRegistryIntegration(t *testing.T) {
 
 		// Execute mini-pipeline.
 		state := domain.NewState()
-		state = state.With(domain.KeyQuestion, "What is the best programming language?")
+		state = domain.With(state, domain.KeyQuestion, "What is the best programming language?")
 
 		state, err = answerer.Execute(ctx, state)
 		require.NoError(t, err)
@@ -280,7 +272,7 @@ func TestUnitRegistryIntegration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify pipeline completed successfully.
-		_, ok := state.Get("verdict")
+		_, ok := domain.Get(state, domain.KeyVerdict)
 		assert.True(t, ok, "Pipeline should produce a verdict")
 	})
 

@@ -102,28 +102,18 @@ func (mpu *MaxPoolUnit) Name() string { return mpu.name }
 // and produces a Verdict with the winning answer.
 // Returns updated state with the verdict or an error if aggregation fails.
 func (mpu *MaxPoolUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
-	answersRaw, ok := state.Get(domain.KeyAnswers)
+	answers, ok := domain.Get(state, domain.KeyAnswers)
 	if !ok {
 		return state, fmt.Errorf("answers not found in state")
-	}
-
-	answers, ok := answersRaw.([]domain.Answer)
-	if !ok {
-		return state, fmt.Errorf("answers in state are not of type []domain.Answer")
 	}
 
 	if len(answers) == 0 {
 		return state, fmt.Errorf("no answers to aggregate")
 	}
 
-	scoresRaw, ok := state.Get(domain.KeyJudgeScores)
+	judgeSummaries, ok := domain.Get(state, domain.KeyJudgeScores)
 	if !ok {
 		return state, fmt.Errorf("judge scores not found in state")
-	}
-
-	judgeSummaries, ok := scoresRaw.([]domain.JudgeSummary)
-	if !ok {
-		return state, fmt.Errorf("judge scores in state are not of type []domain.JudgeSummary")
 	}
 
 	numAnswers := len(answers)
@@ -160,7 +150,7 @@ func (mpu *MaxPoolUnit) Execute(ctx context.Context, state domain.State) (domain
 		// TODO: Add trace and budget information when available.
 	}
 
-	return state.With(domain.KeyVerdict, verdict), nil
+	return domain.With(state, domain.KeyVerdict, &verdict), nil
 }
 
 // Aggregate implements the domain.Aggregator interface using maximum selection

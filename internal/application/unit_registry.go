@@ -41,7 +41,7 @@ func NewDefaultUnitRegistry(llmClient ports.LLMClient) *DefaultUnitRegistry {
 
 // registerBuiltinFactories registers the standard unit types provided
 // by the evaluation framework.
-// This includes answerer, score_judge, and max_pool units.
+// This includes answerer, score_judge, max_pool, and verification units.
 func (r *DefaultUnitRegistry) registerBuiltinFactories() {
 	// Capture the current LLM client to avoid data races.
 	client := r.llmClient
@@ -62,6 +62,17 @@ func (r *DefaultUnitRegistry) registerBuiltinFactories() {
 		// Inject LLM client into config.
 		config["llm_client"] = client
 		unit, err := units.CreateScoreJudgeUnit(id, config)
+		if err != nil {
+			return nil, err
+		}
+		return unit, nil
+	}
+
+	// Register VerificationUnit factory.
+	r.factories["verification"] = func(id string, config map[string]any) (ports.Unit, error) {
+		// Inject LLM client into config.
+		config["llm_client"] = client
+		unit, err := units.CreateVerificationUnit(id, config)
 		if err != nil {
 			return nil, err
 		}

@@ -263,19 +263,14 @@ func (sju *ScoreJudgeUnit) Name() string { return sju.name }
 // and stores JudgeSummary objects in state using KeyJudgeScores.
 // Returns updated state with scoring results or an error if scoring fails.
 func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
-	question, ok := state.GetString(domain.KeyQuestion)
+	question, ok := domain.Get(state, domain.KeyQuestion)
 	if !ok {
-		return state, fmt.Errorf("unit %s: question not found in state with key %s", sju.name, domain.KeyQuestion)
+		return state, fmt.Errorf("unit %s: question not found in state", sju.name)
 	}
 
-	answersRaw, ok := state.Get(domain.KeyAnswers)
+	answers, ok := domain.Get(state, domain.KeyAnswers)
 	if !ok {
-		return state, fmt.Errorf("unit %s: answers not found in state with key %s", sju.name, domain.KeyAnswers)
-	}
-
-	answers, ok := answersRaw.([]domain.Answer)
-	if !ok {
-		return state, fmt.Errorf("unit %s: answers in state are not of type []domain.Answer, got %T", sju.name, answersRaw)
+		return state, fmt.Errorf("unit %s: answers not found in state", sju.name)
 	}
 
 	if len(answers) == 0 {
@@ -361,7 +356,7 @@ func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (dom
 		return state, err
 	}
 
-	return state.With(domain.KeyJudgeScores, judgeSummaries), nil
+	return domain.With(state, domain.KeyJudgeScores, judgeSummaries), nil
 }
 
 // Validate checks if the unit is properly configured and ready for execution.

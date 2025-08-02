@@ -58,20 +58,20 @@ func TestPipeline_Execute(t *testing.T) {
 			setupPipeline: func() (ports.Pipeline, []*mockExecutable) {
 				pipeline := NewPipeline("test-pipeline")
 				mocks := make([]*mockExecutable, 3)
-				
+
 				for i := 0; i < 3; i++ {
 					final := i
 					mocks[i] = &mockExecutable{
 						id: fmt.Sprintf("unit%d", i),
 						executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 							// Add a value to verify execution order
-							return state.With(domain.StateKey(fmt.Sprintf("step%d", final)), final), nil
+							return domain.With(state, domain.NewKey[int](fmt.Sprintf("step%d", final)), final), nil
 						},
 					}
 					err := pipeline.Add(mocks[i])
 					require.NoError(t, err)
 				}
-				
+
 				return pipeline, mocks
 			},
 			initialState: domain.NewState(),
@@ -81,10 +81,10 @@ func TestPipeline_Execute(t *testing.T) {
 				for _, m := range mocks {
 					assert.True(t, m.wasExecuted())
 				}
-				
+
 				// Verify execution order
 				for i := 0; i < 3; i++ {
-					val, exists := state.Get(domain.StateKey(fmt.Sprintf("step%d", i)))
+					val, exists := domain.Get(state, domain.NewKey[int](fmt.Sprintf("step%d", i)))
 					assert.True(t, exists)
 					assert.Equal(t, i, val)
 				}
@@ -95,33 +95,33 @@ func TestPipeline_Execute(t *testing.T) {
 			setupPipeline: func() (ports.Pipeline, []*mockExecutable) {
 				pipeline := NewPipeline("error-pipeline")
 				mocks := make([]*mockExecutable, 3)
-				
+
 				mocks[0] = &mockExecutable{
 					id: "unit0",
 					executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 						return state, nil
 					},
 				}
-				
+
 				mocks[1] = &mockExecutable{
 					id: "unit1",
 					executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 						return state, errors.New("unit1 failed")
 					},
 				}
-				
+
 				mocks[2] = &mockExecutable{
 					id: "unit2",
 					executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 						return state, nil
 					},
 				}
-				
+
 				for _, m := range mocks {
 					err := pipeline.Add(m)
 					require.NoError(t, err)
 				}
-				
+
 				return pipeline, mocks
 			},
 			initialState: domain.NewState(),
@@ -138,7 +138,7 @@ func TestPipeline_Execute(t *testing.T) {
 			setupPipeline: func() (ports.Pipeline, []*mockExecutable) {
 				pipeline := NewPipeline("cancel-pipeline")
 				mocks := make([]*mockExecutable, 2)
-				
+
 				mocks[0] = &mockExecutable{
 					id: "unit0",
 					executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
@@ -147,19 +147,19 @@ func TestPipeline_Execute(t *testing.T) {
 						return state, nil
 					},
 				}
-				
+
 				mocks[1] = &mockExecutable{
 					id: "unit1",
 					executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 						return state, nil
 					},
 				}
-				
+
 				for _, m := range mocks {
 					err := pipeline.Add(m)
 					require.NoError(t, err)
 				}
-				
+
 				return pipeline, mocks
 			},
 			initialState: domain.NewState(),
@@ -176,7 +176,7 @@ func TestPipeline_Execute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pipeline, mocks := tt.setupPipeline()
-			
+
 			ctx := context.Background()
 			if tt.name == "handles context cancellation" {
 				var cancel context.CancelFunc
@@ -186,9 +186,9 @@ func TestPipeline_Execute(t *testing.T) {
 					cancel()
 				}()
 			}
-			
+
 			resultState, err := pipeline.Execute(ctx, tt.initialState)
-			
+
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errMsg != "" {
@@ -197,7 +197,7 @@ func TestPipeline_Execute(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			
+
 			if tt.verify != nil {
 				tt.verify(t, resultState, mocks)
 			}
@@ -248,7 +248,7 @@ func TestPipeline_Add(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			pipeline := tt.setup()
 			err := pipeline.Add(tt.exec)
-			
+
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errMsg != "" {
@@ -274,10 +274,10 @@ func TestLayer_Execute(t *testing.T) {
 			setupLayer: func() (ports.Layer, []*mockExecutable) {
 				layer := NewLayer("test-layer")
 				mocks := make([]*mockExecutable, 3)
-				
+
 				// Use a channel to verify parallel execution
 				startChan := make(chan int, 3)
-				
+
 				for i := 0; i < 3; i++ {
 					final := i
 					mocks[i] = &mockExecutable{
@@ -286,13 +286,13 @@ func TestLayer_Execute(t *testing.T) {
 							startChan <- final
 							// Simulate some work
 							time.Sleep(10 * time.Millisecond)
-							return state.With(domain.StateKey(fmt.Sprintf("unit%d", final)), true), nil
+							return domain.With(state, domain.NewKey[bool](fmt.Sprintf("unit%d", final)), true), nil
 						},
 					}
 					err := layer.Add(mocks[i])
 					require.NoError(t, err)
 				}
-				
+
 				// Verify units start in parallel
 				go func() {
 					starts := make([]int, 0, 3)
@@ -302,7 +302,7 @@ func TestLayer_Execute(t *testing.T) {
 					// All should start before any finish
 					assert.Len(t, starts, 3)
 				}()
-				
+
 				return layer, mocks
 			},
 			initialState: domain.NewState(),
@@ -319,33 +319,33 @@ func TestLayer_Execute(t *testing.T) {
 			setupLayer: func() (ports.Layer, []*mockExecutable) {
 				layer := NewLayer("error-layer")
 				mocks := make([]*mockExecutable, 3)
-				
+
 				mocks[0] = &mockExecutable{
 					id: "unit0",
 					executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 						return state, nil
 					},
 				}
-				
+
 				mocks[1] = &mockExecutable{
 					id: "unit1",
 					executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 						return state, errors.New("unit1 failed")
 					},
 				}
-				
+
 				mocks[2] = &mockExecutable{
 					id: "unit2",
 					executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 						return state, nil
 					},
 				}
-				
+
 				for _, m := range mocks {
 					err := layer.Add(m)
 					require.NoError(t, err)
 				}
-				
+
 				return layer, mocks
 			},
 			initialState: domain.NewState(),
@@ -362,15 +362,15 @@ func TestLayer_Execute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			layer, mocks := tt.setupLayer()
-			
+
 			resultState, err := layer.Execute(context.Background(), tt.initialState)
-			
+
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 			}
-			
+
 			if tt.verify != nil {
 				tt.verify(t, resultState, mocks)
 			}
@@ -421,7 +421,7 @@ func TestGraph_AddNode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			graph := tt.setup()
 			err := graph.AddNode(tt.node)
-			
+
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errMsg != "" {
@@ -493,13 +493,13 @@ func TestGraph_AddEdge(t *testing.T) {
 				require.NoError(t, err)
 				err = g.AddNode(&mockExecutable{id: "node3"})
 				require.NoError(t, err)
-				
+
 				// Create edges: 1 -> 2 -> 3
 				err = g.AddEdge("node1", "node2")
 				require.NoError(t, err)
 				err = g.AddEdge("node2", "node3")
 				require.NoError(t, err)
-				
+
 				return g
 			},
 			sourceID: "node3",
@@ -513,7 +513,7 @@ func TestGraph_AddEdge(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			graph := tt.setup()
 			err := graph.AddEdge(tt.sourceID, tt.targetID)
-			
+
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errMsg != "" {
@@ -537,19 +537,19 @@ func TestGraph_TopologicalSort(t *testing.T) {
 			name: "sorts simple chain",
 			setup: func() ports.Graph {
 				g := NewGraph()
-				
+
 				// Add nodes
 				for i := 1; i <= 3; i++ {
 					err := g.AddNode(&mockExecutable{id: fmt.Sprintf("node%d", i)})
 					require.NoError(t, err)
 				}
-				
+
 				// Create chain: 1 -> 2 -> 3
 				err := g.AddEdge("node1", "node2")
 				require.NoError(t, err)
 				err = g.AddEdge("node2", "node3")
 				require.NoError(t, err)
-				
+
 				return g
 			},
 			want:    []string{"node1", "node2", "node3"},
@@ -559,14 +559,14 @@ func TestGraph_TopologicalSort(t *testing.T) {
 			name: "sorts diamond pattern",
 			setup: func() ports.Graph {
 				g := NewGraph()
-				
+
 				// Add nodes
 				nodes := []string{"A", "B", "C", "D"}
 				for _, id := range nodes {
 					err := g.AddNode(&mockExecutable{id: id})
 					require.NoError(t, err)
 				}
-				
+
 				// Create diamond: A -> B,C -> D
 				err := g.AddEdge("A", "B")
 				require.NoError(t, err)
@@ -576,7 +576,7 @@ func TestGraph_TopologicalSort(t *testing.T) {
 				require.NoError(t, err)
 				err = g.AddEdge("C", "D")
 				require.NoError(t, err)
-				
+
 				return g
 			},
 			want:    []string{"A", "B", "C", "D"}, // B and C can be in any order
@@ -586,21 +586,21 @@ func TestGraph_TopologicalSort(t *testing.T) {
 			name: "handles disconnected components",
 			setup: func() ports.Graph {
 				g := NewGraph()
-				
+
 				// Add two disconnected chains
 				for i := 1; i <= 4; i++ {
 					err := g.AddNode(&mockExecutable{id: fmt.Sprintf("node%d", i)})
 					require.NoError(t, err)
 				}
-				
+
 				// Chain 1: 1 -> 2
 				err := g.AddEdge("node1", "node2")
 				require.NoError(t, err)
-				
+
 				// Chain 2: 3 -> 4
 				err = g.AddEdge("node3", "node4")
 				require.NoError(t, err)
-				
+
 				return g
 			},
 			want:    []string{"node1", "node2", "node3", "node4"}, // Order between chains doesn't matter
@@ -611,30 +611,30 @@ func TestGraph_TopologicalSort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			graph := tt.setup()
-			
+
 			sorted, err := graph.TopologicalSort()
-			
+
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
-				
+
 				// Verify we have all nodes
 				assert.Len(t, sorted, len(tt.want))
-				
+
 				// For simple chain, verify exact order
 				if tt.name == "sorts simple chain" {
 					for i, exec := range sorted {
 						assert.Equal(t, tt.want[i], exec.ID())
 					}
 				}
-				
+
 				// For other cases, just verify all nodes are present
 				gotIDs := make(map[string]bool)
 				for _, exec := range sorted {
 					gotIDs[exec.ID()] = true
 				}
-				
+
 				for _, wantID := range tt.want {
 					assert.True(t, gotIDs[wantID], "missing node %s", wantID)
 				}

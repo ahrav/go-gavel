@@ -64,7 +64,7 @@ func (m *mockUnit) Name() string {
 
 func (m *mockUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
 	// Simple implementation that adds a marker to state
-	return state.With(domain.StateKey("executed_"+m.id), true), nil
+	return domain.With(state, domain.NewKey[bool]("executed_"+m.id), true), nil
 }
 
 func (m *mockUnit) Validate() error {

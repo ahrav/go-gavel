@@ -76,6 +76,11 @@ type Verdict struct {
 	// AggregateScore is the final computed score for the winning answer.
 	AggregateScore float64 `json:"aggregate_score"`
 
+	// RequiresHumanReview indicates whether the evaluation requires human
+	// review based on confidence thresholds from verification units.
+	// It is omitted from JSON when false to reduce payload size.
+	RequiresHumanReview bool `json:"requires_human_review,omitempty"`
+
 	// Trace contains detailed execution metadata for each judge.
 	// It is omitted from JSON when empty to reduce payload size.
 	Trace []TraceMeta `json:"trace,omitempty"`

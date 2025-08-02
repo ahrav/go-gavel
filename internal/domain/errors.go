@@ -29,8 +29,8 @@ var (
 // StateError represents an error that occurred during State operations.
 // It provides context about which key and operation caused the error.
 type StateError struct {
-	// Key is the StateKey that was involved in the failed operation.
-	Key StateKey
+	// Key is the state key name that was involved in the failed operation.
+	Key string
 
 	// Operation describes what operation was being performed when the error occurred.
 	Operation string
@@ -48,7 +48,7 @@ func (e *StateError) Error() string {
 func (e *StateError) Unwrap() error { return e.Err }
 
 // NewStateError creates a new StateError with the given details.
-func NewStateError(key StateKey, operation string, err error) *StateError {
+func NewStateError(key string, operation string, err error) *StateError {
 	return &StateError{
 		Key:       key,
 		Operation: operation,

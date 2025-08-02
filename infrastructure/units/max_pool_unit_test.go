@@ -165,16 +165,14 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 					{Score: 0.8, Reasoning: "Good answer", Confidence: 0.9},
 					{Score: 0.9, Reasoning: "Better answer", Confidence: 0.95},
 				}
-				state = state.With(domain.KeyAnswers, answers)
-				state = state.With(domain.KeyJudgeScores, judgeSummaries)
+				state = domain.With(state, domain.KeyAnswers, answers)
+				state = domain.With(state, domain.KeyJudgeScores, judgeSummaries)
 				return state
 			},
 			validateResult: func(t *testing.T, state domain.State) {
-				verdictRaw, ok := state.Get("verdict")
+				verdict, ok := domain.Get(state, domain.KeyVerdict)
 				require.True(t, ok, "Verdict should be present in state")
-
-				verdict, ok := verdictRaw.(domain.Verdict)
-				require.True(t, ok, "Verdict should be of correct type")
+				require.NotNil(t, verdict, "Verdict should not be nil")
 
 				assert.Equal(t, "answer2", verdict.WinnerAnswer.ID)
 				assert.Equal(t, 0.9, verdict.AggregateScore)
@@ -194,7 +192,7 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 				judgeSummaries := []domain.JudgeSummary{
 					{Score: 0.8, Reasoning: "Good", Confidence: 0.9},
 				}
-				state = state.With(domain.KeyJudgeScores, judgeSummaries)
+				state = domain.With(state, domain.KeyJudgeScores, judgeSummaries)
 				return state
 			},
 			expectedError: "answers not found in state",
@@ -211,7 +209,7 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 				answers := []domain.Answer{
 					{ID: "answer1", Content: "First answer"},
 				}
-				state = state.With(domain.KeyAnswers, answers)
+				state = domain.With(state, domain.KeyAnswers, answers)
 				// Missing judge scores
 				return state
 			},
@@ -235,16 +233,14 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 					{Score: 0.8, Reasoning: "Good", Confidence: 0.9},
 					{Score: 0.9, Reasoning: "Better", Confidence: 0.95},
 				}
-				state = state.With(domain.KeyAnswers, answers)
-				state = state.With(domain.KeyJudgeScores, judgeSummaries)
+				state = domain.With(state, domain.KeyAnswers, answers)
+				state = domain.With(state, domain.KeyJudgeScores, judgeSummaries)
 				return state
 			},
 			validateResult: func(t *testing.T, state domain.State) {
-				verdictRaw, ok := state.Get("verdict")
+				verdict, ok := domain.Get(state, domain.KeyVerdict)
 				require.True(t, ok)
-
-				verdict, ok := verdictRaw.(domain.Verdict)
-				require.True(t, ok)
+				require.NotNil(t, verdict)
 
 				// Should work with truncated data (first 2 answers and scores).
 				assert.Equal(t, "answer2", verdict.WinnerAnswer.ID)
@@ -267,8 +263,8 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 				judgeSummaries := []domain.JudgeSummary{
 					{Score: 0.8, Reasoning: "Good", Confidence: 0.9},
 				}
-				state = state.With(domain.KeyAnswers, answers)
-				state = state.With(domain.KeyJudgeScores, judgeSummaries)
+				state = domain.With(state, domain.KeyAnswers, answers)
+				state = domain.With(state, domain.KeyJudgeScores, judgeSummaries)
 				return state
 			},
 			expectedError: "mismatch between answers (2) and judge scores (1)",

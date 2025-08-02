@@ -42,19 +42,16 @@ func TestScoreJudgeUnit_Execute(t *testing.T) {
 			},
 			setupState: func() domain.State {
 				state := domain.NewState()
-				state = state.With(domain.KeyQuestion, "What is machine learning?")
+				state = domain.With(state, domain.KeyQuestion, "What is machine learning?")
 				answers := []domain.Answer{
 					{ID: "answer1", Content: "ML is a subset of AI"},
 					{ID: "answer2", Content: "Machine learning algorithms learn from data"},
 				}
-				return state.With(domain.KeyAnswers, answers)
+				return domain.With(state, domain.KeyAnswers, answers)
 			},
 			validateResult: func(t *testing.T, state domain.State) {
-				scoresRaw, ok := state.Get(domain.KeyJudgeScores)
+				judgeSummaries, ok := domain.Get(state, domain.KeyJudgeScores)
 				require.True(t, ok, "Judge scores should be present in state")
-
-				judgeSummaries, ok := scoresRaw.([]domain.JudgeSummary)
-				require.True(t, ok, "Judge scores should be of correct type")
 				require.Len(t, judgeSummaries, 2, "Should have scores for both answers")
 
 				for i, summary := range judgeSummaries {
@@ -78,7 +75,7 @@ func TestScoreJudgeUnit_Execute(t *testing.T) {
 			setupState: func() domain.State {
 				state := domain.NewState()
 				answers := []domain.Answer{{ID: "answer1", Content: "Test answer"}}
-				return state.With(domain.KeyAnswers, answers)
+				return domain.With(state, domain.KeyAnswers, answers)
 			},
 			expectedError: "question not found in state",
 		},
@@ -94,7 +91,7 @@ func TestScoreJudgeUnit_Execute(t *testing.T) {
 			},
 			setupState: func() domain.State {
 				state := domain.NewState()
-				return state.With(domain.KeyQuestion, "Test question?")
+				return domain.With(state, domain.KeyQuestion, "Test question?")
 			},
 			expectedError: "answers not found in state",
 		},
@@ -110,8 +107,8 @@ func TestScoreJudgeUnit_Execute(t *testing.T) {
 			},
 			setupState: func() domain.State {
 				state := domain.NewState()
-				state = state.With(domain.KeyQuestion, "Test question?")
-				return state.With(domain.KeyAnswers, []domain.Answer{})
+				state = domain.With(state, domain.KeyQuestion, "Test question?")
+				return domain.With(state, domain.KeyAnswers, []domain.Answer{})
 			},
 			expectedError: "no answers to score",
 		},

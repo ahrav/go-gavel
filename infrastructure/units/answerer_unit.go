@@ -145,7 +145,7 @@ func (au *AnswererUnit) Name() string { return au.name }
 // of answers, and stores them in state using KeyAnswers.
 // Returns updated state with generated answers or an error if generation fails.
 func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
-	question, ok := state.GetString(domain.KeyQuestion)
+	question, ok := domain.Get(state, domain.KeyQuestion)
 	if !ok {
 		return state, ErrQuestionMissing
 	}
@@ -205,7 +205,7 @@ func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain
 		return state, au.aggregateErrors(err, "answer generation")
 	}
 
-	return state.With(domain.KeyAnswers, answers), nil
+	return domain.With(state, domain.KeyAnswers, answers), nil
 }
 
 // Validate checks if the unit is properly configured and ready for execution.

@@ -35,14 +35,11 @@ func TestAnswererUnit_Execute(t *testing.T) {
 			},
 			setupState: func() domain.State {
 				state := domain.NewState()
-				return state.With(domain.KeyQuestion, "What is artificial intelligence?")
+				return domain.With(state, domain.KeyQuestion, "What is artificial intelligence?")
 			},
 			validateResult: func(t *testing.T, state domain.State) {
-				answersRaw, ok := state.Get(domain.KeyAnswers)
+				answers, ok := domain.Get(state, domain.KeyAnswers)
 				require.True(t, ok, "Answers should be present in state")
-
-				answers, ok := answersRaw.([]domain.Answer)
-				require.True(t, ok, "Answers should be of correct type")
 				require.Len(t, answers, 2, "Should generate 2 answers as configured")
 
 				for i, answer := range answers {
@@ -79,7 +76,7 @@ func TestAnswererUnit_Execute(t *testing.T) {
 			},
 			setupState: func() domain.State {
 				state := domain.NewState()
-				return state.With(domain.KeyQuestion, "")
+				return domain.With(state, domain.KeyQuestion, "")
 			},
 			expectedError: "question cannot be empty",
 		},
@@ -452,7 +449,7 @@ func TestAnswererUnit_ContextCancellation(t *testing.T) {
 
 	t.Run("cancels execution when context cancelled", func(t *testing.T) {
 		state := domain.NewState()
-		state = state.With(domain.KeyQuestion, "What is the meaning of life?")
+		state = domain.With(state, domain.KeyQuestion, "What is the meaning of life?")
 
 		// Create a context that we'll cancel immediately
 		ctx, cancel := context.WithCancel(context.Background())

@@ -11,6 +11,9 @@ import (
 	"github.com/ahrav/go-gavel/internal/domain"
 )
 
+// Test key for unit tests
+var testKey = domain.NewKey[string]("test")
+
 // mockUnit is a test implementation of the Unit interface
 type mockUnit struct {
 	name        string
@@ -42,7 +45,7 @@ func TestUnit_Interface(t *testing.T) {
 		name: "test-unit",
 		executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
 			// Add a test value to state
-			return state.With(domain.StateKey("test"), "value"), nil
+			return domain.With(state, testKey, "value"), nil
 		},
 		validateErr: nil,
 	}
@@ -61,14 +64,12 @@ func TestUnit_Interface(t *testing.T) {
 	require.NoError(t, err, "Execute() should not return error")
 
 	// Verify state was modified
-	val, ok := newState.Get(domain.StateKey("test"))
+	val, ok := domain.Get(newState, testKey)
 	require.True(t, ok, "Execute() should add test key to state")
-	v, ok := val.(string)
-	require.True(t, ok, "Value should be string")
-	assert.Equal(t, "value", v, "Execute() state value mismatch")
+	assert.Equal(t, "value", val, "Execute() state value mismatch")
 
 	// Verify original state unchanged
-	_, ok = initialState.Get(domain.StateKey("test"))
+	_, ok = domain.Get(initialState, testKey)
 	assert.False(t, ok, "Execute() should not modify original state")
 }
 

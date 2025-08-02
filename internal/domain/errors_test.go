@@ -10,21 +10,21 @@ import (
 func TestStateError(t *testing.T) {
 	tests := []struct {
 		name      string
-		key       StateKey
+		key       string
 		operation string
 		err       error
 		wantMsg   string
 	}{
 		{
 			name:      "basic state error",
-			key:       KeyQuestion,
+			key:       KeyQuestion.name,
 			operation: "Get",
 			err:       ErrKeyNotFound,
 			wantMsg:   "state error: operation=Get, key=question, err=key not found",
 		},
 		{
 			name:      "with wrapped error",
-			key:       KeyAnswers,
+			key:       KeyAnswers.name,
 			operation: "With",
 			err:       ErrTypeMismatch,
 			wantMsg:   "state error: operation=With, key=answers, err=type mismatch",
@@ -97,7 +97,7 @@ func TestCommonDomainErrors(t *testing.T) {
 func TestErrorWrapping(t *testing.T) {
 	// Test Go 1.13+ error wrapping features
 	baseErr := errors.New("base error")
-	stateErr := NewStateError(KeyQuestion, "Test", baseErr)
+	stateErr := NewStateError(KeyQuestion.name, "Test", baseErr)
 
 	// Test Is functionality
 	assert.True(t, errors.Is(stateErr, baseErr), "Should match base error with Is")
@@ -107,7 +107,7 @@ func TestErrorWrapping(t *testing.T) {
 	assert.Equal(t, baseErr, unwrapped, "Should unwrap to base error")
 
 	// Test wrapping with standard library errors
-	wrappedErr := NewStateError(KeyAnswers, "Process", ErrKeyNotFound)
+	wrappedErr := NewStateError(KeyAnswers.name, "Process", ErrKeyNotFound)
 	assert.True(t, errors.Is(wrappedErr, ErrKeyNotFound), "Should match domain error")
 }
 

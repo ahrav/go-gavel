@@ -84,7 +84,7 @@ func TestNewDefaultUnitRegistry(t *testing.T) {
 
 		// Built-in factories should still be registered.
 		supportedTypes := registry.GetSupportedTypes()
-		assert.Len(t, supportedTypes, 4) // answerer, score_judge, max_pool, mean_pool
+		assert.Len(t, supportedTypes, 5) // answerer, score_judge, verification, max_pool, mean_pool
 	})
 }
 
@@ -321,7 +321,7 @@ func TestGetSupportedTypes(t *testing.T) {
 		types := registry.GetSupportedTypes()
 		sort.Strings(types) // For consistent comparison
 
-		expected := []string{"answerer", "max_pool", "mean_pool", "score_judge"}
+		expected := []string{"answerer", "max_pool", "mean_pool", "score_judge", "verification"}
 		sort.Strings(expected)
 
 		assert.Equal(t, expected, types)
@@ -337,7 +337,7 @@ func TestGetSupportedTypes(t *testing.T) {
 
 		types := registry.GetSupportedTypes()
 		assert.Contains(t, types, "custom_type")
-		assert.Len(t, types, 5) // 4 built-in + 1 custom
+		assert.Len(t, types, 6) // 5 built-in + 1 custom
 	})
 }
 

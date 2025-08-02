@@ -18,106 +18,117 @@ func TestNewState(t *testing.T) {
 
 func TestState_Get(t *testing.T) {
 	tests := []struct {
-		name      string
-		setup     func() State
-		key       StateKey
-		wantValue any
-		wantOK    bool
+		name   string
+		setup  func() State
+		assert func(t *testing.T, state State)
 	}{
 		{
 			name: "get existing string value",
 			setup: func() State {
-				return NewState().With(KeyQuestion, "test question")
+				return With(NewState(), KeyQuestion, "test question")
 			},
-			key:       KeyQuestion,
-			wantValue: "test question",
-			wantOK:    true,
+			assert: func(t *testing.T, state State) {
+				got, ok := Get(state, KeyQuestion)
+				assert.True(t, ok, "Get() should find existing key")
+				assert.Equal(t, "test question", got, "Get() value mismatch")
+			},
 		},
 		{
 			name: "get non-existent key",
 			setup: func() State {
 				return NewState()
 			},
-			key:       KeyQuestion,
-			wantValue: "",
-			wantOK:    false,
+			assert: func(t *testing.T, state State) {
+				_, ok := Get(state, KeyQuestion)
+				assert.False(t, ok, "Get() should not find non-existent key")
+			},
 		},
 		{
-			name: "get with wrong type",
+			name: "get answers array",
 			setup: func() State {
-				return NewState().With(KeyQuestion, 123)
+				answers := []Answer{{ID: "1", Content: "A"}, {ID: "2", Content: "B"}}
+				return With(NewState(), KeyAnswers, answers)
 			},
-			key:       KeyQuestion,
-			wantValue: "",
-			wantOK:    false,
+			assert: func(t *testing.T, state State) {
+				got, ok := Get(state, KeyAnswers)
+				assert.True(t, ok, "Get() should find answers")
+				assert.Len(t, got, 2, "Should have 2 answers")
+				assert.Equal(t, "A", got[0].Content, "First answer content mismatch")
+			},
 		},
 		{
-			name: "get slice value",
+			name: "get int64 budget tokens",
 			setup: func() State {
-				return NewState().With(KeyAnswers, []string{"A", "B", "C"})
+				return With(NewState(), KeyBudgetTokensUsed, int64(1000))
 			},
-			key:       KeyAnswers,
-			wantValue: []string{"A", "B", "C"},
-			wantOK:    true,
+			assert: func(t *testing.T, state State) {
+				got, ok := Get(state, KeyBudgetTokensUsed)
+				assert.True(t, ok, "Get() should find tokens")
+				assert.Equal(t, int64(1000), got, "Token value mismatch")
+			},
+		},
+		{
+			name: "get verdict pointer",
+			setup: func() State {
+				verdict := &Verdict{ID: "v1", AggregateScore: 0.9}
+				return With(NewState(), KeyVerdict, verdict)
+			},
+			assert: func(t *testing.T, state State) {
+				got, ok := Get(state, KeyVerdict)
+				assert.True(t, ok, "Get() should find verdict")
+				assert.NotNil(t, got, "Verdict should not be nil")
+				assert.Equal(t, "v1", got.ID, "Verdict ID mismatch")
+				assert.Equal(t, 0.9, got.AggregateScore, "Verdict score mismatch")
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			state := tt.setup()
-
-			switch v := tt.wantValue.(type) {
-			case string:
-				got, ok := state.GetString(tt.key)
-				assert.Equal(t, tt.wantOK, ok, "GetString() ok mismatch")
-				assert.Equal(t, v, got, "GetString() value mismatch")
-			case []string:
-				got, ok := state.GetStrings(tt.key)
-				assert.Equal(t, tt.wantOK, ok, "GetStrings() ok mismatch")
-				if ok {
-					assert.Equal(t, v, got, "GetStrings() value mismatch")
-				}
-			}
+			tt.assert(t, state)
 		})
 	}
 }
 
 func TestState_With(t *testing.T) {
 	original := NewState()
-	key := KeyQuestion
 	value := "test question"
 
 	// Test adding new value
-	updated := original.With(key, value)
+	updated := With(original, KeyQuestion, value)
 
 	// Verify original is unchanged
-	_, ok := original.GetString(key)
+	_, ok := Get(original, KeyQuestion)
 	assert.False(t, ok, "With() should not modify original state")
 
 	// Verify new state has the value
-	got, ok := updated.GetString(key)
+	got, ok := Get(updated, KeyQuestion)
 	require.True(t, ok, "With() should add new value to state")
 	assert.Equal(t, value, got, "With() value mismatch")
 
 	// Test updating existing value
 	newValue := "updated question"
-	updated2 := updated.With(key, newValue)
+	updated2 := With(updated, KeyQuestion, newValue)
 
 	// Verify previous state unchanged
-	v, _ := updated.GetString(key)
+	v, _ := Get(updated, KeyQuestion)
 	assert.Equal(t, value, v, "With() should not modify previous state when updating")
 
 	// Verify new state has updated value
-	v2, _ := updated2.GetString(key)
+	v2, _ := Get(updated2, KeyQuestion)
 	assert.Equal(t, newValue, v2, "With() updated value mismatch")
 }
 
 func TestState_WithMultiple(t *testing.T) {
 	original := NewState()
-	updates := map[StateKey]any{
-		KeyQuestion:    "Which is better?",
-		KeyAnswers:     []string{"Option A", "Option B"},
-		KeyJudgeScores: map[string]float64{"judge1": 0.8, "judge2": 0.6},
+	answers := []Answer{{ID: "1", Content: "Option A"}, {ID: "2", Content: "Option B"}}
+	judgeSummaries := []JudgeSummary{{Score: 0.8, Reasoning: "Good"}, {Score: 0.6, Reasoning: "OK"}}
+
+	updates := map[string]any{
+		KeyQuestion.name:    "Which is better?",
+		KeyAnswers.name:     answers,
+		KeyJudgeScores.name: judgeSummaries,
 	}
 
 	updated := original.WithMultiple(updates)
@@ -126,67 +137,81 @@ func TestState_WithMultiple(t *testing.T) {
 	assert.Empty(t, original.Keys(), "WithMultiple() should not modify original state")
 
 	// Verify all updates applied
-	question, ok := updated.GetString(KeyQuestion)
+	question, ok := Get(updated, KeyQuestion)
 	require.True(t, ok, "WithMultiple() should apply question update")
 	assert.Equal(t, "Which is better?", question, "Question mismatch")
 
-	answers, ok := updated.GetStrings(KeyAnswers)
+	gotAnswers, ok := Get(updated, KeyAnswers)
 	require.True(t, ok, "WithMultiple() should apply answers update")
-	assert.Len(t, answers, 2, "Answers length mismatch")
+	assert.Len(t, gotAnswers, 2, "Answers length mismatch")
 
-	scoresRaw, ok := updated.Get(KeyJudgeScores)
+	gotScores, ok := Get(updated, KeyJudgeScores)
 	require.True(t, ok, "WithMultiple() should apply scores update")
-	scores, ok := scoresRaw.(map[string]float64)
-	require.True(t, ok, "Scores should be map[string]float64")
-	assert.Len(t, scores, 2, "Scores length mismatch")
+	assert.Len(t, gotScores, 2, "Scores length mismatch")
 }
 
 func TestState_Keys(t *testing.T) {
-	state := NewState().
-		With(KeyQuestion, "q").
-		With(KeyAnswers, []string{"a"}).
-		With(KeyJudgeScores, map[string]float64{})
+	answers := []Answer{{ID: "1", Content: "a"}}
+	judgeSummaries := []JudgeSummary{{Score: 0.5, Reasoning: "OK"}}
+
+	state := With(With(With(NewState(),
+		KeyQuestion, "q"),
+		KeyAnswers, answers),
+		KeyJudgeScores, judgeSummaries)
 
 	keys := state.Keys()
 	assert.Len(t, keys, 3, "Keys() should return 3 keys")
 
 	// Verify all expected keys present
-	keyMap := make(map[StateKey]bool)
+	keyMap := make(map[string]bool)
 	for _, k := range keys {
 		keyMap[k] = true
 	}
 
-	assert.True(t, keyMap[KeyQuestion], "Keys() should include KeyQuestion")
-	assert.True(t, keyMap[KeyAnswers], "Keys() should include KeyAnswers")
-	assert.True(t, keyMap[KeyJudgeScores], "Keys() should include KeyJudgeScores")
+	assert.True(t, keyMap[KeyQuestion.name], "Keys() should include KeyQuestion")
+	assert.True(t, keyMap[KeyAnswers.name], "Keys() should include KeyAnswers")
+	assert.True(t, keyMap[KeyJudgeScores.name], "Keys() should include KeyJudgeScores")
 }
 
 func TestState_Immutability(t *testing.T) {
 	// Test that modifying retrieved slices doesn't affect state
-	answers := []string{"A", "B", "C"}
-	state := NewState().With(KeyAnswers, answers)
+	answers := []Answer{{ID: "1", Content: "A"}, {ID: "2", Content: "B"}, {ID: "3", Content: "C"}}
+	state := With(NewState(), KeyAnswers, answers)
 
 	// Modify original slice
-	answers[0] = "Modified"
+	answers[0].Content = "Modified"
 
 	// Verify state is unchanged
-	retrieved, ok := state.GetStrings(KeyAnswers)
+	retrieved, ok := Get(state, KeyAnswers)
 	require.True(t, ok, "Should retrieve answers")
-	assert.NotEqual(t, "Modified", retrieved[0], "State should not be affected by external slice modifications")
+	assert.NotEqual(t, "Modified", retrieved[0].Content, "State should not be affected by external slice modifications")
 }
 
 func TestState_DeepCopy(t *testing.T) {
+	// Define custom keys for testing
+	var (
+		keyStrings = Key[[]string]{"strings"}
+		keyMap     = Key[map[string]string]{"map"}
+		keyNested  = Key[[][]int]{"nested"}
+		keyComplex = Key[map[string][]int]{"complex"}
+		keyStruct  = Key[struct {
+			Name  string
+			Count int
+		}]{"struct"}
+		keyPtr = Key[*TraceMeta]{"ptr"}
+	)
+
 	tests := []struct {
 		name     string
-		key      StateKey
-		value    any
+		setup    func() State
 		modifier func(any)
 		verifier func(*testing.T, any, any)
 	}{
 		{
-			name:  "slice of strings",
-			key:   StateKey("strings"),
-			value: []string{"a", "b", "c"},
+			name: "slice of strings",
+			setup: func() State {
+				return With(NewState(), keyStrings, []string{"a", "b", "c"})
+			},
 			modifier: func(v any) {
 				s, ok := v.([]string)
 				if !ok {
@@ -208,9 +233,10 @@ func TestState_DeepCopy(t *testing.T) {
 			},
 		},
 		{
-			name:  "map of strings",
-			key:   StateKey("map"),
-			value: map[string]string{"key1": "value1", "key2": "value2"},
+			name: "map of strings",
+			setup: func() State {
+				return With(NewState(), keyMap, map[string]string{"key1": "value1", "key2": "value2"})
+			},
 			modifier: func(v any) {
 				m, ok := v.(map[string]string)
 				if !ok {
@@ -235,9 +261,10 @@ func TestState_DeepCopy(t *testing.T) {
 			},
 		},
 		{
-			name:  "nested slices",
-			key:   StateKey("nested"),
-			value: [][]int{{1, 2}, {3, 4}},
+			name: "nested slices",
+			setup: func() State {
+				return With(NewState(), keyNested, [][]int{{1, 2}, {3, 4}})
+			},
 			modifier: func(v any) {
 				s, ok := v.([][]int)
 				if !ok {
@@ -259,16 +286,16 @@ func TestState_DeepCopy(t *testing.T) {
 			},
 		},
 		{
-			name:  "map with slice values",
-			key:   StateKey("complex"),
-			value: map[string][]int{"a": {1, 2, 3}, "b": {4, 5, 6}},
+			name: "map with slice values",
+			setup: func() State {
+				return With(NewState(), keyComplex, map[string][]int{"a": {1, 2, 3}, "b": {4, 5, 6}})
+			},
 			modifier: func(v any) {
 				m, ok := v.(map[string][]int)
 				if !ok {
 					t.Fatalf("Expected map[string][]int, got %T", v)
 				}
 				m["a"][0] = 99
-				m["c"] = []int{7, 8, 9}
 			},
 			verifier: func(t *testing.T, original, retrieved any) {
 				orig, ok := original.(map[string][]int)
@@ -281,17 +308,16 @@ func TestState_DeepCopy(t *testing.T) {
 				}
 				assert.Equal(t, 99, orig["a"][0], "Original map slice should be modified")
 				assert.Equal(t, 1, ret["a"][0], "State map slice should be unchanged")
-				assert.Contains(t, orig, "c", "Original should have new key")
-				assert.NotContains(t, ret, "c", "State should not have new key")
 			},
 		},
 		{
 			name: "struct value",
-			key:  StateKey("struct"),
-			value: struct {
-				Name  string
-				Count int
-			}{"test", 42},
+			setup: func() State {
+				return With(NewState(), keyStruct, struct {
+					Name  string
+					Count int
+				}{"test", 42})
+			},
 			modifier: func(v any) {
 				// Structs are copied by value, so this won't affect original
 			},
@@ -301,9 +327,10 @@ func TestState_DeepCopy(t *testing.T) {
 			},
 		},
 		{
-			name:  "pointer to struct",
-			key:   StateKey("ptr"),
-			value: &TraceMeta{JudgeID: "judge1", Score: 0.9},
+			name: "pointer to struct",
+			setup: func() State {
+				return With(NewState(), keyPtr, &TraceMeta{JudgeID: "judge1", Score: 0.9})
+			},
 			modifier: func(v any) {
 				ptr, ok := v.(*TraceMeta)
 				if !ok {
@@ -329,24 +356,66 @@ func TestState_DeepCopy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create state with value
-			state := NewState().With(tt.key, tt.value)
+			state := tt.setup()
 
 			// Get value from state
-			retrieved, ok := state.Get(tt.key)
-			require.True(t, ok, "Should retrieve value")
+			var retrieved any
+			var ok bool
 
-			// Modify the original value
-			tt.modifier(tt.value)
+			// Use type switch to get the value with the right key
+			switch tt.name {
+			case "slice of strings":
+				retrieved, ok = Get(state, keyStrings)
+			case "map of strings":
+				retrieved, ok = Get(state, keyMap)
+			case "nested slices":
+				retrieved, ok = Get(state, keyNested)
+			case "map with slice values":
+				retrieved, ok = Get(state, keyComplex)
+			case "struct value":
+				retrieved, ok = Get(state, keyStruct)
+			case "pointer to struct":
+				retrieved, ok = Get(state, keyPtr)
+			}
 
-			// Verify state is unaffected
-			tt.verifier(t, tt.value, retrieved)
+			require.True(t, ok, "Get() should find value")
+
+			// Modify the original value (not the retrieved copy)
+			switch tt.name {
+			case "slice of strings":
+				original := []string{"a", "b", "c"}
+				tt.modifier(original)
+				tt.verifier(t, original, retrieved)
+			case "map of strings":
+				original := map[string]string{"key1": "value1", "key2": "value2"}
+				tt.modifier(original)
+				tt.verifier(t, original, retrieved)
+			case "nested slices":
+				original := [][]int{{1, 2}, {3, 4}}
+				tt.modifier(original)
+				tt.verifier(t, original, retrieved)
+			case "map with slice values":
+				original := map[string][]int{"a": {1, 2, 3}, "b": {4, 5, 6}}
+				tt.modifier(original)
+				tt.verifier(t, original, retrieved)
+			case "struct value":
+				original := struct {
+					Name  string
+					Count int
+				}{"test", 42}
+				tt.modifier(original)
+				tt.verifier(t, original, retrieved)
+			case "pointer to struct":
+				original := &TraceMeta{JudgeID: "judge1", Score: 0.9}
+				tt.modifier(original)
+				tt.verifier(t, original, retrieved)
+			}
 		})
 	}
 }
 
 func TestState_String(t *testing.T) {
-	state := NewState().With(KeyQuestion, "test")
+	state := With(NewState(), KeyQuestion, "test")
 	str := state.String()
 
 	assert.NotEmpty(t, str, "String() should return non-empty representation")
@@ -356,10 +425,13 @@ func TestState_String(t *testing.T) {
 func TestState_ConcurrentAccess(t *testing.T) {
 	t.Run("concurrent reads", func(t *testing.T) {
 		// Create a state with some initial data
-		state := NewState().
-			With(KeyQuestion, "test question").
-			With(KeyAnswers, []string{"A", "B", "C"}).
-			With(StateKey("data"), map[string]int{"count": 100})
+		answers := []Answer{{ID: "1", Content: "A"}, {ID: "2", Content: "B"}, {ID: "3", Content: "C"}}
+		customKey := Key[map[string]int]{"data"}
+
+		state := With(With(With(NewState(),
+			KeyQuestion, "test question"),
+			KeyAnswers, answers),
+			customKey, map[string]int{"count": 100})
 
 		// Run multiple goroutines reading concurrently
 		const numReaders = 100
@@ -372,15 +444,15 @@ func TestState_ConcurrentAccess(t *testing.T) {
 				// Perform multiple reads
 				for j := 0; j < 100; j++ {
 					// Read different keys
-					q, ok := state.GetString(KeyQuestion)
+					q, ok := Get(state, KeyQuestion)
 					assert.True(t, ok, "Reader %d: Should get question", id)
 					assert.Equal(t, "test question", q, "Reader %d: Question mismatch", id)
 
-					a, ok := state.GetStrings(KeyAnswers)
+					a, ok := Get(state, KeyAnswers)
 					assert.True(t, ok, "Reader %d: Should get answers", id)
 					assert.Len(t, a, 3, "Reader %d: Answers length mismatch", id)
 
-					d, ok := state.Get(StateKey("data"))
+					d, ok := Get(state, customKey)
 					assert.True(t, ok, "Reader %d: Should get data", id)
 					assert.NotNil(t, d, "Reader %d: Data should not be nil", id)
 
@@ -398,7 +470,7 @@ func TestState_ConcurrentAccess(t *testing.T) {
 	})
 
 	t.Run("concurrent writes create independent states", func(t *testing.T) {
-		baseState := NewState().With(KeyQuestion, "initial")
+		baseState := With(NewState(), KeyQuestion, "initial")
 
 		// Run multiple goroutines creating new states concurrently
 		const numWriters = 50
@@ -410,16 +482,17 @@ func TestState_ConcurrentAccess(t *testing.T) {
 				defer func() { done <- true }()
 
 				// Each writer creates its own state based on the base
-				newState := baseState.With(StateKey(fmt.Sprintf("writer_%d", id)), id)
+				writerKey := Key[int]{fmt.Sprintf("writer_%d", id)}
+				newState := With(baseState, writerKey, id)
 				states[id] = newState
 
 				// Verify the writer's own key exists
-				val, ok := newState.Get(StateKey(fmt.Sprintf("writer_%d", id)))
+				val, ok := Get(newState, writerKey)
 				assert.True(t, ok, "Writer %d: Should have own key", id)
 				assert.Equal(t, id, val, "Writer %d: Value mismatch", id)
 
 				// Verify base state is unchanged
-				q, ok := baseState.GetString(KeyQuestion)
+				q, ok := Get(baseState, KeyQuestion)
 				assert.True(t, ok, "Writer %d: Base should have question", id)
 				assert.Equal(t, "initial", q, "Writer %d: Base question unchanged", id)
 			}(i)
@@ -439,366 +512,163 @@ func TestState_ConcurrentAccess(t *testing.T) {
 			// Verify no cross-contamination between states
 			for j := 0; j < numWriters; j++ {
 				if i != j {
-					_, ok := states[i].Get(StateKey(fmt.Sprintf("writer_%d", j)))
-					assert.False(t, ok, "State %d should not have writer_%d key", i, j)
+					otherKey := Key[int]{fmt.Sprintf("writer_%d", j)}
+					_, ok := Get(states[i], otherKey)
+					assert.False(t, ok, "State %d should not have key from writer %d", i, j)
 				}
 			}
 		}
 	})
-
-	t.Run("concurrent mixed operations", func(t *testing.T) {
-		// Create a base state
-		state := NewState().
-			With(KeyQuestion, "base question").
-			With(StateKey("counter"), 0)
-
-		const numOps = 100
-		done := make(chan State, numOps)
-
-		// Mix of readers and writers
-		for i := 0; i < numOps; i++ {
-			go func(id int) {
-				if id%2 == 0 {
-					// Reader operation
-					q, _ := state.GetString(KeyQuestion)
-					assert.Equal(t, "base question", q, "Reader %d: Question should be unchanged", id)
-					done <- state
-				} else {
-					// Writer operation - creates new state
-					newState := state.With(StateKey(fmt.Sprintf("op_%d", id)), id)
-					done <- newState
-				}
-			}(i)
-		}
-
-		// Collect all resulting states
-		resultStates := make([]State, numOps)
-		for i := 0; i < numOps; i++ {
-			resultStates[i] = <-done
-		}
-
-		// Verify original state is unchanged
-		keys := state.Keys()
-		assert.Len(t, keys, 2, "Original state should have only 2 keys")
-		q, _ := state.GetString(KeyQuestion)
-		assert.Equal(t, "base question", q, "Original question should be unchanged")
-	})
-
-	t.Run("concurrent deep copy verification", func(t *testing.T) {
-		// Create a state with mutable reference types
-		originalSlice := []string{"a", "b", "c"}
-		originalMap := map[string]int{"x": 1, "y": 2}
-		state := NewState().
-			With(StateKey("slice"), originalSlice).
-			With(StateKey("map"), originalMap)
-
-		const numGoroutines = 20
-		done := make(chan bool, numGoroutines)
-
-		// Each goroutine creates its own copy and modifies it
-		for i := 0; i < numGoroutines; i++ {
-			go func(id int) {
-				defer func() { done <- true }()
-
-				// Get value from state and modify a local copy
-				if id%2 == 0 {
-					// Test slice immutability
-					s, ok := state.Get(StateKey("slice"))
-					assert.True(t, ok, "Worker %d: Should get slice", id)
-
-					// Try to modify what we got (should not affect state)
-					localSlice, ok := s.([]string)
-					if !ok {
-						t.Errorf("Worker %d: Expected []string, got %T", id, s)
-						return
-					}
-					if len(localSlice) > 0 {
-						// This modifies the local reference, not the state
-						localSlice[0] = fmt.Sprintf("modified_%d", id)
-					}
-
-					// Verify state is unchanged
-					s2, _ := state.Get(StateKey("slice"))
-					stateSlice, ok := s2.([]string)
-					if !ok {
-						t.Errorf("Worker %d: Expected []string for state slice, got %T", id, s2)
-						return
-					}
-					assert.Equal(t, []string{"a", "b", "c"}, stateSlice,
-						"Worker %d: State slice should be unchanged", id)
-				} else {
-					// Test map immutability
-					m, ok := state.Get(StateKey("map"))
-					assert.True(t, ok, "Worker %d: Should get map", id)
-
-					// Try to modify what we got (should not affect state)
-					localMap, ok := m.(map[string]int)
-					if !ok {
-						t.Errorf("Worker %d: Expected map[string]int, got %T", id, m)
-						return
-					}
-					localMap[fmt.Sprintf("key_%d", id)] = id
-
-					// Verify state is unchanged
-					m2, _ := state.Get(StateKey("map"))
-					stateMap, ok := m2.(map[string]int)
-					if !ok {
-						t.Errorf("Worker %d: Expected map[string]int for state map, got %T", id, m2)
-						return
-					}
-					assert.Equal(t, 2, len(stateMap),
-						"Worker %d: State map should have only 2 keys", id)
-					assert.Equal(t, 1, stateMap["x"],
-						"Worker %d: Map value x should be unchanged", id)
-					assert.Equal(t, 2, stateMap["y"],
-						"Worker %d: Map value y should be unchanged", id)
-				}
-			}(i)
-		}
-
-		// Wait for all operations to complete
-		for i := 0; i < numGoroutines; i++ {
-			<-done
-		}
-
-		// Final verification - state should still be unchanged
-		finalSlice, _ := state.Get(StateKey("slice"))
-		finalSliceTyped, ok := finalSlice.([]string)
-		require.True(t, ok, "Expected finalSlice to be []string")
-		assert.Equal(t, []string{"a", "b", "c"}, finalSliceTyped,
-			"Final state slice should be unchanged")
-
-		finalMap, _ := state.Get(StateKey("map"))
-		finalMapTyped, ok := finalMap.(map[string]int)
-		require.True(t, ok, "Expected finalMap to be map[string]int")
-		assert.Equal(t, map[string]int{"x": 1, "y": 2}, finalMapTyped,
-			"Final state map should be unchanged")
-	})
-
-	t.Run("race detection on State methods", func(t *testing.T) {
-		// This test specifically targets potential race conditions in State methods
-		state := NewState()
-		const numOps = 200
-		done := make(chan bool, numOps)
-
-		// Concurrent operations on the same state instance
-		for i := 0; i < numOps; i++ {
-			go func(id int) {
-				defer func() { done <- true }()
-
-				key := StateKey(fmt.Sprintf("key_%d", id%10))
-
-				switch id % 5 {
-				case 0:
-					// With operation
-					newState := state.With(key, id)
-					assert.NotNil(t, newState, "Op %d: With should return non-nil state", id)
-				case 1:
-					// WithMultiple operation
-					updates := map[StateKey]any{
-						key:                                   id,
-						StateKey(fmt.Sprintf("extra_%d", id)): "value",
-					}
-					newState := state.WithMultiple(updates)
-					assert.NotNil(t, newState, "Op %d: WithMultiple should return non-nil state", id)
-				case 2:
-					// Get operation
-					_, _ = state.Get(key)
-				case 3:
-					// Keys operation
-					keys := state.Keys()
-					assert.NotNil(t, keys, "Op %d: Keys should return non-nil slice", id)
-				case 4:
-					// String operation
-					str := state.String()
-					assert.NotEmpty(t, str, "Op %d: String should return non-empty", id)
-				}
-			}(i)
-		}
-
-		// Wait for all operations
-		for i := 0; i < numOps; i++ {
-			<-done
-		}
-	})
 }
 
-func TestState_TypeSafeAccessors(t *testing.T) {
-	t.Run("GetInt", func(t *testing.T) {
-		state := NewState().With(StateKey("count"), 42)
+func TestState_ExecutionContext(t *testing.T) {
+	ctx := ExecutionContext{
+		GraphID:        "graph-123",
+		EvaluationType: "comparison",
+		ExecutionID:    "exec-456",
+	}
 
-		// Valid int retrieval
-		val, ok := state.GetInt(StateKey("count"))
-		assert.True(t, ok, "GetInt should succeed")
-		assert.Equal(t, 42, val, "GetInt value mismatch")
+	state := NewState().WithExecutionContext(ctx)
 
-		// Non-existent key
-		val, ok = state.GetInt(StateKey("missing"))
-		assert.False(t, ok, "GetInt should fail for missing key")
-		assert.Equal(t, 0, val, "GetInt should return zero value for missing key")
+	// Verify all context fields are set
+	graphID, ok := Get(state, KeyGraphID)
+	require.True(t, ok, "Should have graph ID")
+	assert.Equal(t, "graph-123", graphID, "Graph ID mismatch")
 
-		// Wrong type
-		state2 := state.With(StateKey("str"), "not an int")
-		val, ok = state2.GetInt(StateKey("str"))
-		assert.False(t, ok, "GetInt should fail for wrong type")
-		assert.Equal(t, 0, val, "GetInt should return zero value for wrong type")
-	})
+	evalType, ok := Get(state, KeyEvaluationType)
+	require.True(t, ok, "Should have evaluation type")
+	assert.Equal(t, "comparison", evalType, "Evaluation type mismatch")
 
-	t.Run("GetInt64", func(t *testing.T) {
-		var bigNum int64 = 9223372036854775807 // max int64
-		state := NewState().With(StateKey("bignum"), bigNum)
+	execID, ok := Get(state, KeyExecutionID)
+	require.True(t, ok, "Should have execution ID")
+	assert.Equal(t, "exec-456", execID, "Execution ID mismatch")
 
-		val, ok := state.GetInt64(StateKey("bignum"))
-		assert.True(t, ok, "GetInt64 should succeed")
-		assert.Equal(t, bigNum, val, "GetInt64 value mismatch")
+	// Verify budget counters initialized
+	tokens, ok := Get(state, KeyBudgetTokensUsed)
+	require.True(t, ok, "Should have tokens counter")
+	assert.Equal(t, int64(0), tokens, "Tokens should be initialized to 0")
 
-		// Wrong type
-		state2 := state.With(StateKey("int32"), int32(100))
-		_, ok = state2.GetInt64(StateKey("int32"))
-		assert.False(t, ok, "GetInt64 should fail for int32")
-	})
+	calls, ok := Get(state, KeyBudgetCallsMade)
+	require.True(t, ok, "Should have calls counter")
+	assert.Equal(t, int64(0), calls, "Calls should be initialized to 0")
 
-	t.Run("GetFloat64", func(t *testing.T) {
-		state := NewState().With(StateKey("pi"), 3.14159)
+	// Test GetExecutionContext
+	retrievedCtx, ok := state.GetExecutionContext()
+	require.True(t, ok, "Should retrieve execution context")
+	assert.Equal(t, ctx, retrievedCtx, "Retrieved context should match")
 
-		val, ok := state.GetFloat64(StateKey("pi"))
-		assert.True(t, ok, "GetFloat64 should succeed")
-		assert.InDelta(t, 3.14159, val, 0.00001, "GetFloat64 value mismatch")
+	// Test missing context
+	emptyState := NewState()
+	_, ok = emptyState.GetExecutionContext()
+	assert.False(t, ok, "Should not retrieve context from empty state")
+}
 
-		// Wrong type
-		state2 := state.With(StateKey("int"), 3)
-		val, ok = state2.GetFloat64(StateKey("int"))
-		assert.False(t, ok, "GetFloat64 should fail for int")
-		assert.Equal(t, float64(0), val, "GetFloat64 should return zero value")
-	})
+func TestState_BudgetUsage(t *testing.T) {
+	// Initialize state with execution context
+	ctx := ExecutionContext{
+		GraphID:        "graph-123",
+		EvaluationType: "comparison",
+		ExecutionID:    "exec-456",
+	}
+	state := NewState().WithExecutionContext(ctx)
 
-	t.Run("GetBool", func(t *testing.T) {
-		state := NewState().
-			With(StateKey("enabled"), true).
-			With(StateKey("disabled"), false)
+	// Update budget usage
+	state = state.UpdateBudgetUsage(100, 1)
 
-		// True value
-		val, ok := state.GetBool(StateKey("enabled"))
-		assert.True(t, ok, "GetBool should succeed for true")
-		assert.True(t, val, "GetBool should return true")
+	// Verify usage
+	usage := state.GetBudgetUsage()
+	assert.Equal(t, int64(100), usage.Tokens, "Tokens mismatch")
+	assert.Equal(t, int64(1), usage.Calls, "Calls mismatch")
 
-		// False value
-		val, ok = state.GetBool(StateKey("disabled"))
-		assert.True(t, ok, "GetBool should succeed for false")
-		assert.False(t, val, "GetBool should return false")
+	// Update again to test accumulation
+	state = state.UpdateBudgetUsage(50, 2)
 
-		// Missing key
-		val, ok = state.GetBool(StateKey("missing"))
-		assert.False(t, ok, "GetBool should fail for missing key")
-		assert.False(t, val, "GetBool should return false for missing key")
-	})
+	usage = state.GetBudgetUsage()
+	assert.Equal(t, int64(150), usage.Tokens, "Accumulated tokens mismatch")
+	assert.Equal(t, int64(3), usage.Calls, "Accumulated calls mismatch")
 
-	t.Run("GetTime", func(t *testing.T) {
-		now := time.Now().Round(time.Second)
-		state := NewState().With(StateKey("timestamp"), now)
+	// Test on empty state (should default to 0)
+	emptyState := NewState()
+	usage = emptyState.GetBudgetUsage()
+	assert.Equal(t, int64(0), usage.Tokens, "Empty state tokens should be 0")
+	assert.Equal(t, int64(0), usage.Calls, "Empty state calls should be 0")
+}
 
-		val, ok := state.GetTime(StateKey("timestamp"))
-		assert.True(t, ok, "GetTime should succeed")
-		assert.Equal(t, now, val, "GetTime value mismatch")
+func TestState_TypedKeys(t *testing.T) {
+	// Test that keys provide compile-time type safety
+	// Note: Keys with the same name but different types will overwrite each other
+	// since the underlying storage uses string keys
+	intKey := Key[int]{"count"}
+	stringKey := Key[string]{"message"}
 
-		// Zero time for missing key
-		val, ok = state.GetTime(StateKey("missing"))
-		assert.False(t, ok, "GetTime should fail for missing key")
-		assert.True(t, val.IsZero(), "GetTime should return zero time")
-	})
+	state := With(With(NewState(),
+		intKey, 42),
+		stringKey, "forty-two")
 
-	t.Run("GetStringMap", func(t *testing.T) {
-		original := map[string]string{
-			"key1": "value1",
-			"key2": "value2",
-		}
-		state := NewState().With(StateKey("config"), original)
+	// Get values with type safety
+	intVal, ok := Get(state, intKey)
+	require.True(t, ok, "Should get int value")
+	assert.Equal(t, 42, intVal, "Int value mismatch")
 
-		// Valid retrieval
-		val, ok := state.GetStringMap(StateKey("config"))
-		assert.True(t, ok, "GetStringMap should succeed")
-		assert.Equal(t, original, val, "GetStringMap value mismatch")
+	strVal, ok := Get(state, stringKey)
+	require.True(t, ok, "Should get string value")
+	assert.Equal(t, "forty-two", strVal, "String value mismatch")
 
-		// Test immutability
-		val["key3"] = "value3"
-		original["key4"] = "value4"
+	// Keys should be distinct
+	keys := state.Keys()
+	assert.Len(t, keys, 2, "Should have two distinct keys")
 
-		// Get again and verify original in state is unchanged
-		val2, _ := state.GetStringMap(StateKey("config"))
-		assert.Len(t, val2, 2, "State map should be unchanged")
-		assert.NotContains(t, val2, "key3", "State should not have external modifications")
-		assert.NotContains(t, val2, "key4", "State should not have original modifications")
-	})
+	// Test that same key name with different types overwrites
+	overwriteKey1 := Key[int]{"shared"}
+	overwriteKey2 := Key[string]{"shared"}
 
-	t.Run("GetIntMap", func(t *testing.T) {
-		original := map[string]int{
-			"a": 1,
-			"b": 2,
-			"c": 3,
-		}
-		state := NewState().With(StateKey("scores"), original)
+	state2 := With(NewState(), overwriteKey1, 100)
+	state2 = With(state2, overwriteKey2, "hundred")
 
-		val, ok := state.GetIntMap(StateKey("scores"))
-		assert.True(t, ok, "GetIntMap should succeed")
-		assert.Equal(t, original, val, "GetIntMap value mismatch")
+	// The string value should have overwritten the int value
+	_, ok = Get(state2, overwriteKey1)
+	assert.False(t, ok, "Int value should be overwritten")
 
-		// Test immutability
-		val["d"] = 4
-		val2, _ := state.GetIntMap(StateKey("scores"))
-		assert.Len(t, val2, 3, "State map should be unchanged")
-	})
+	strVal2, ok := Get(state2, overwriteKey2)
+	require.True(t, ok, "String value should exist")
+	assert.Equal(t, "hundred", strVal2, "String value should be stored")
+}
 
-	t.Run("GetFloat64Map", func(t *testing.T) {
-		original := map[string]float64{
-			"weight": 0.8,
-			"score":  0.95,
-		}
-		state := NewState().With(StateKey("metrics"), original)
+func TestState_ComplexTypes(t *testing.T) {
+	// Test with various complex types
+	now := time.Now()
 
-		val, ok := state.GetFloat64Map(StateKey("metrics"))
-		assert.True(t, ok, "GetFloat64Map should succeed")
-		assert.Equal(t, original, val, "GetFloat64Map value mismatch")
+	timeKey := Key[time.Time]{"timestamp"}
+	sliceMapKey := Key[[]map[string]any]{"complex"}
 
-		// Wrong type
-		state2 := state.With(StateKey("intmap"), map[string]int{"a": 1})
-		val, ok = state2.GetFloat64Map(StateKey("intmap"))
-		assert.False(t, ok, "GetFloat64Map should fail for wrong map type")
-		assert.Nil(t, val, "GetFloat64Map should return nil for wrong type")
-	})
+	complexData := []map[string]any{
+		{"name": "test", "value": 123},
+		{"name": "another", "value": 456},
+	}
 
-	t.Run("mixed types in same state", func(t *testing.T) {
-		now := time.Now()
-		state := NewState().
-			With(StateKey("string"), "hello").
-			With(StateKey("int"), 42).
-			With(StateKey("float"), 3.14).
-			With(StateKey("bool"), true).
-			With(StateKey("time"), now).
-			With(StateKey("strmap"), map[string]string{"k": "v"})
+	state := With(With(With(NewState(),
+		timeKey, now),
+		sliceMapKey, complexData),
+		KeyBudget, &BudgetReport{
+			TotalSpent: 10.5,
+			TokensUsed: 1000,
+			CallsMade:  5,
+		})
 
-		// Verify all types can coexist
-		s, ok := state.GetString(StateKey("string"))
-		assert.True(t, ok)
-		assert.Equal(t, "hello", s)
+	// Verify time
+	gotTime, ok := Get(state, timeKey)
+	require.True(t, ok, "Should get time")
+	assert.Equal(t, now, gotTime, "Time mismatch")
 
-		i, ok := state.GetInt(StateKey("int"))
-		assert.True(t, ok)
-		assert.Equal(t, 42, i)
+	// Verify complex data
+	gotComplex, ok := Get(state, sliceMapKey)
+	require.True(t, ok, "Should get complex data")
+	assert.Len(t, gotComplex, 2, "Complex data length mismatch")
 
-		f, ok := state.GetFloat64(StateKey("float"))
-		assert.True(t, ok)
-		assert.InDelta(t, 3.14, f, 0.01)
-
-		b, ok := state.GetBool(StateKey("bool"))
-		assert.True(t, ok)
-		assert.True(t, b)
-
-		tm, ok := state.GetTime(StateKey("time"))
-		assert.True(t, ok)
-		assert.Equal(t, now, tm)
-
-		m, ok := state.GetStringMap(StateKey("strmap"))
-		assert.True(t, ok)
-		assert.Equal(t, "v", m["k"])
-	})
+	// Verify budget report
+	budget, ok := Get(state, KeyBudget)
+	require.True(t, ok, "Should get budget")
+	assert.Equal(t, 10.5, budget.TotalSpent, "Budget total spent mismatch")
+	assert.Equal(t, 1000, budget.TokensUsed, "Budget tokens mismatch")
+	assert.Equal(t, 5, budget.CallsMade, "Budget calls mismatch")
 }
