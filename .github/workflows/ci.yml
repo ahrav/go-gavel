@@ -130,6 +130,8 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-22.04
+    permissions:
+      security-events: write
 
     steps:
       - name: Checkout code
