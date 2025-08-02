@@ -28,5 +28,14 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+.claude/
+.bmad-core/
+
+
+docs/architecture/
+docs/prd/
+docs/stories/
+docs/prd.md
+docs/architecture.md
