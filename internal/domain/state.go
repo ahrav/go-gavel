@@ -24,6 +24,9 @@ const (
 
 	// KeyJudgeScores stores individual judge scoring results.
 	KeyJudgeScores StateKey = "judge_scores"
+
+	// KeyVerdict stores the final verdict from aggregation.
+	KeyVerdict StateKey = "verdict"
 )
 
 // deepCopyValue creates a deep copy of a value to ensure true immutability.

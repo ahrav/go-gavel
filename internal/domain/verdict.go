@@ -43,6 +43,10 @@ type JudgeSummary struct {
 	// Confidence indicates how certain the judge is about its evaluation
 	// (0.0 to 1.0).
 	Confidence float64 `json:"confidence"`
+
+	// Score is the numerical score assigned by this judge.
+	// This field tracks individual judge scores for aggregation patterns.
+	Score float64 `json:"score"`
 }
 
 // BudgetReport tracks resource consumption across the entire evaluation.
