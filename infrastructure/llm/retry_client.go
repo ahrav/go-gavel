@@ -182,7 +182,7 @@ func (r *RetryingLLMClient) calculateRetryDelay(attempt int) time.Duration {
 		delay += time.Duration(rand.Int64N(2*jitter) - jitter)
 	}
 
-	if delay < 0 {
+	if delay < r.config.BaseDelay {
 		return r.config.BaseDelay
 	}
 
