@@ -3,6 +3,7 @@ package testutils
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ahrav/go-gavel/internal/ports"
@@ -267,7 +268,7 @@ func (m *MockLLMClient) findMatchingResponse(prompt string) string {
 	// Check any other custom patterns that might have been added
 	knownPatterns := []string{"rate", "score", "judge", "evaluate", "generate", "answer", "provide"}
 	for pattern, response := range m.responses {
-		if pattern != "" && !contains(knownPatterns, pattern) && strings.Contains(promptLower, pattern) {
+		if pattern != "" && !sliceContains(knownPatterns, pattern) && strings.Contains(promptLower, pattern) {
 			return response
 		}
 	}
@@ -281,14 +282,9 @@ func (m *MockLLMClient) findMatchingResponse(prompt string) string {
 	return "Mock response for testing purposes."
 }
 
-// contains checks if a string slice contains a specific string
-func contains(slice []string, str string) bool {
-	for _, s := range slice {
-		if s == str {
-			return true
-		}
-	}
-	return false
+// sliceContains checks if a string slice contains a specific string
+func sliceContains(slice []string, str string) bool {
+	return slices.Contains(slice, str)
 }
 
 // addVariation adds deterministic variation to responses based on prompt characteristics.
