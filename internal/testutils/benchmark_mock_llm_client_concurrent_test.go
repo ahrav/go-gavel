@@ -123,7 +123,7 @@ func TestBenchmarkMockLLMClientRaceDetection(t *testing.T) {
 		func() {
 			config := DefaultJudgeConfig()
 			config.NoiseFactor = 0.15
-			client.config = config
+			client.SetConfig(config)
 		},
 		// Set ensemble config
 		func() {

@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,6 +36,9 @@ type BenchmarkMockLLMClient struct {
 
 	// biasPosition adds positional bias (0 = no bias, positive = favor later answers)
 	biasPosition float64
+
+	// mu protects rng access for thread safety
+	mu sync.Mutex
 
 	// rng is the instance-specific random number generator for thread safety
 	rng *rand.Rand
@@ -109,7 +113,8 @@ func NewBenchmarkMockLLMClient(
 		judgePersonality:    personality,
 		config:              DefaultJudgeConfig(),
 		biasPosition:        0.0,
-		rng:                 rand.New(rand.NewSource(seed)),
+		// G404: Intentionally using weak RNG for deterministic test behavior
+		rng: rand.New(rand.NewSource(seed)), //nolint:gosec // Fixed seed for reproducible tests
 	}
 }
 
@@ -137,11 +142,22 @@ func NewBiasedBenchmarkMockLLMClient(
 func (m *BenchmarkMockLLMClient) Complete(
 	ctx context.Context, prompt string, options map[string]any,
 ) (string, error) {
+	m.mu.Lock()
 	m.requestCount++
+	requestCount := m.requestCount
+	m.mu.Unlock()
 
 	// Check for catastrophic failures first
 	if err := m.checkCatastrophicFailures(ctx); err != nil {
 		return "", err
+	}
+
+	// Check for rate limiting
+	m.mu.Lock()
+	rateLimitAfter := m.rateLimitAfter
+	m.mu.Unlock()
+	if rateLimitAfter > 0 && requestCount > rateLimitAfter {
+		return "", fmt.Errorf("rate limit exceeded: too many requests")
 	}
 
 	if m.overrideError != nil {
@@ -306,13 +322,16 @@ func (m *BenchmarkMockLLMClient) calculateBaseScore(questionContent, answerConte
 	for _, c := range string(m.judgePersonality) {
 		errorSeed += int64(c)
 	}
-	localRng := rand.New(rand.NewSource(errorSeed))
+	localRng := rand.New(rand.NewSource(errorSeed)) //nolint:gosec // Fixed seed for reproducible tests
 
 	// Generate base score
 	var baseScore float64
 	if isCorrect {
 		// Correct answers usually get high scores, but not always
-		if localRng.Float64() < m.config.CorrectAnswerAccuracy {
+		m.mu.Lock()
+		correctAccuracy := m.config.CorrectAnswerAccuracy
+		m.mu.Unlock()
+		if localRng.Float64() < correctAccuracy {
 			baseScore = 0.75 + localRng.Float64()*0.20 // Score between 0.75-0.95
 		} else {
 			// Sometimes judges miss correct answers - this is an error
@@ -322,7 +341,10 @@ func (m *BenchmarkMockLLMClient) calculateBaseScore(questionContent, answerConte
 		}
 	} else {
 		// Incorrect answers usually get low scores, but not always
-		if localRng.Float64() < m.config.IncorrectAnswerAccuracy {
+		m.mu.Lock()
+		incorrectAccuracy := m.config.IncorrectAnswerAccuracy
+		m.mu.Unlock()
+		if localRng.Float64() < incorrectAccuracy {
 			baseScore = 0.25 + localRng.Float64()*0.25 // Score between 0.25-0.50
 		} else {
 			// Sometimes judges wrongly favor incorrect answers - this is an error
@@ -343,7 +365,9 @@ func (m *BenchmarkMockLLMClient) applyPersonalityModifiers(baseScore float64, an
 	personalityNoise := 0.0
 
 	// Apply personality strength scaling
+	m.mu.Lock()
 	strength := m.config.PersonalityStrength
+	m.mu.Unlock()
 
 	switch m.judgePersonality {
 	case ConservativeJudge:
@@ -364,7 +388,9 @@ func (m *BenchmarkMockLLMClient) applyPersonalityModifiers(baseScore float64, an
 
 	case ComprehensiveJudge:
 		// Comprehensive judges are well-balanced but consider answer length
+		m.mu.Lock()
 		personalityNoise = (m.rng.Float64() - 0.5) * 0.05
+		m.mu.Unlock()
 
 		// Slight preference for longer, more comprehensive answers
 		answerLength := len(answerID) // This is a proxy; in real scenario would check actual content
@@ -390,7 +416,10 @@ func (m *BenchmarkMockLLMClient) applyPersonalityModifiers(baseScore float64, an
 		// Analytical judges are more likely to give very high or very low scores
 		if score > 0.5 && score < 0.7 {
 			// Push away from middle scores
-			if m.rng.Float64() < 0.5 {
+			m.mu.Lock()
+			randomValue := m.rng.Float64()
+			m.mu.Unlock()
+			if randomValue < 0.5 {
 				score -= 0.1 * strength
 			} else {
 				score += 0.1 * strength
@@ -437,12 +466,14 @@ func (m *BenchmarkMockLLMClient) getAnswerPosition(answerID string) int {
 
 // applyNoise adds controlled randomness to simulate real judge variance.
 func (m *BenchmarkMockLLMClient) applyNoise(score float64) float64 {
+	m.mu.Lock()
 	noise := (m.rng.Float64() - 0.5) * 2 * m.config.NoiseFactor
 
 	// Occasionally add slightly larger errors to simulate real judge mistakes
 	if m.rng.Float64() < m.config.LargeErrorProbability {
 		noise *= m.config.LargeErrorMultiplier
 	}
+	m.mu.Unlock()
 
 	return score + noise
 }
@@ -559,52 +590,77 @@ func CreateCorrelatedBenchmarkEnsembleMocks(
 // Catastrophic failure simulation methods
 
 // SimulateTimeout makes the judge timeout after a delay.
-func (m *BenchmarkMockLLMClient) SimulateTimeout(delay time.Duration) { m.timeoutDelay = delay }
+func (m *BenchmarkMockLLMClient) SimulateTimeout(delay time.Duration) {
+	m.mu.Lock()
+	m.timeoutDelay = delay
+	m.mu.Unlock()
+}
 
 // SimulatePartialResponse returns incomplete JSON.
-func (m *BenchmarkMockLLMClient) SimulatePartialResponse() { m.simulatePartial = true }
+func (m *BenchmarkMockLLMClient) SimulatePartialResponse() {
+	m.mu.Lock()
+	m.simulatePartial = true
+	m.mu.Unlock()
+}
 
 // SimulateMalformedJSON returns invalid JSON.
-func (m *BenchmarkMockLLMClient) SimulateMalformedJSON() { m.simulateMalformed = true }
+func (m *BenchmarkMockLLMClient) SimulateMalformedJSON() {
+	m.mu.Lock()
+	m.simulateMalformed = true
+	m.mu.Unlock()
+}
 
 // SimulateNetworkFailure sets the probability of network failures.
-func (m *BenchmarkMockLLMClient) SimulateNetworkFailure(rate float64) { m.networkFailureRate = rate }
+func (m *BenchmarkMockLLMClient) SimulateNetworkFailure(rate float64) {
+	m.mu.Lock()
+	m.networkFailureRate = rate
+	m.mu.Unlock()
+}
 
 // SimulateRateLimiting triggers rate limiting after N requests.
 func (m *BenchmarkMockLLMClient) SimulateRateLimiting(afterRequests int) {
+	m.mu.Lock()
 	m.rateLimitAfter = afterRequests
+	m.mu.Unlock()
 }
 
 // ResetFailureSimulation clears all failure simulation settings.
 func (m *BenchmarkMockLLMClient) ResetFailureSimulation() {
+	m.mu.Lock()
 	m.timeoutDelay = 0
 	m.simulatePartial = false
 	m.simulateMalformed = false
 	m.networkFailureRate = 0
 	m.rateLimitAfter = 0
 	m.requestCount = 0
+	m.mu.Unlock()
 }
 
 // checkCatastrophicFailures checks and triggers various failure scenarios.
 func (m *BenchmarkMockLLMClient) checkCatastrophicFailures(ctx context.Context) error {
 	// Check for timeout
-	if m.timeoutDelay > 0 {
+	m.mu.Lock()
+	timeoutDelay := m.timeoutDelay
+	networkFailureRate := m.networkFailureRate
+	m.mu.Unlock()
+
+	if timeoutDelay > 0 {
 		select {
-		case <-time.After(m.timeoutDelay):
-			return fmt.Errorf("request timeout after %v", m.timeoutDelay)
+		case <-time.After(timeoutDelay):
+			return fmt.Errorf("request timeout after %v", timeoutDelay)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 
 	// Check for network failure
-	if m.networkFailureRate > 0 && m.rng.Float64() < m.networkFailureRate {
-		return fmt.Errorf("network error: connection refused")
-	}
-
-	// Check for rate limiting
-	if m.rateLimitAfter > 0 && m.requestCount > m.rateLimitAfter {
-		return fmt.Errorf("rate limit exceeded: too many requests")
+	if networkFailureRate > 0 {
+		m.mu.Lock()
+		randomValue := m.rng.Float64()
+		m.mu.Unlock()
+		if randomValue < networkFailureRate {
+			return fmt.Errorf("network error: connection refused")
+		}
 	}
 
 	return nil
@@ -612,7 +668,12 @@ func (m *BenchmarkMockLLMClient) checkCatastrophicFailures(ctx context.Context) 
 
 // applyCatastrophicResponseModifications modifies responses for failure testing.
 func (m *BenchmarkMockLLMClient) applyCatastrophicResponseModifications(response string) string {
-	if m.simulatePartial {
+	m.mu.Lock()
+	simulatePartial := m.simulatePartial
+	simulateMalformed := m.simulateMalformed
+	m.mu.Unlock()
+
+	if simulatePartial {
 		// Return only part of the response
 		if len(response) > 20 {
 			return response[:len(response)/2] + "..."
@@ -620,10 +681,17 @@ func (m *BenchmarkMockLLMClient) applyCatastrophicResponseModifications(response
 		return response[:10]
 	}
 
-	if m.simulateMalformed {
+	if simulateMalformed {
 		// Corrupt the JSON
 		return strings.Replace(response, `"score"`, `"scor`, 1)
 	}
 
 	return response
+}
+
+// SetConfig sets the judge configuration with proper synchronization.
+func (m *BenchmarkMockLLMClient) SetConfig(config JudgeConfig) {
+	m.mu.Lock()
+	m.config = config
+	m.mu.Unlock()
 }

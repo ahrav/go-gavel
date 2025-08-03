@@ -200,7 +200,8 @@ func MixAdversarialQuestions(dataset *BenchmarkDataset, ratio float64) *Benchmar
 	}
 
 	// Shuffle the questions to distribute adversarial ones
-	rng := rand.New(rand.NewSource(42)) // Fixed seed for reproducibility
+	// G404: Intentionally using weak RNG for deterministic test data generation
+	rng := rand.New(rand.NewSource(42)) //nolint:gosec // Fixed seed for reproducible tests
 	rng.Shuffle(len(mixedQuestions), func(i, j int) {
 		mixedQuestions[i], mixedQuestions[j] = mixedQuestions[j], mixedQuestions[i]
 	})

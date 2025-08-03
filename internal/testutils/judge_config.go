@@ -141,7 +141,7 @@ func (c EnsembleConfig) Validate() error {
 
 // LoadJudgeConfig loads a JudgeConfig from a JSON file.
 func LoadJudgeConfig(path string) (JudgeConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Controlled file access in test utilities
 	if err != nil {
 		return JudgeConfig{}, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -160,7 +160,7 @@ func LoadJudgeConfig(path string) (JudgeConfig, error) {
 
 // LoadEnsembleConfig loads an EnsembleConfig from a JSON file.
 func LoadEnsembleConfig(path string) (EnsembleConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Controlled file access in test utilities
 	if err != nil {
 		return EnsembleConfig{}, fmt.Errorf("failed to read config file: %w", err)
 	}

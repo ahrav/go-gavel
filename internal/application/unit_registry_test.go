@@ -72,7 +72,7 @@ func TestNewDefaultUnitRegistry(t *testing.T) {
 		assert.Contains(t, supportedTypes, "answerer")
 		assert.Contains(t, supportedTypes, "score_judge")
 		assert.Contains(t, supportedTypes, "max_pool")
-		assert.Contains(t, supportedTypes, "mean_pool")
+		assert.Contains(t, supportedTypes, "arithmetic_mean")
 		assert.Contains(t, supportedTypes, "median_pool")
 	})
 
@@ -322,7 +322,7 @@ func TestGetSupportedTypes(t *testing.T) {
 		types := registry.GetSupportedTypes()
 		sort.Strings(types) // For consistent comparison
 
-		expected := []string{"answerer", "max_pool", "mean_pool", "median_pool", "score_judge", "verification"}
+		expected := []string{"answerer", "max_pool", "arithmetic_mean", "median_pool", "score_judge", "verification"}
 		sort.Strings(expected)
 
 		assert.Equal(t, expected, types)

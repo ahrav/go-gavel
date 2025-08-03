@@ -42,8 +42,8 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	maxPoolUnit, err := units.NewMaxPoolUnit("aggregator1", units.MaxPoolConfig{
-		TieBreaker:       "first",
+	maxPoolUnit, err := units.NewArithmeticMeanUnit("aggregator1", units.ArithmeticMeanConfig{
+		TieBreaker:       units.TieFirst,
 		MinScore:         0.0,
 		RequireAllScores: true,
 	})

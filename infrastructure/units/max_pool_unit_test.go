@@ -11,47 +11,47 @@ import (
 	"github.com/ahrav/go-gavel/internal/domain"
 )
 
-func TestMaxPoolUnit_Aggregate(t *testing.T) {
+func TestMeanPoolUnit_Aggregate(t *testing.T) {
 	tests := []struct {
 		name             string
 		config           MaxPoolConfig
 		scores           []float64
 		candidates       []domain.Answer
 		expectedWinnerID string
-		expectedScore    float64
+		expectedScore    float64 // This should be the mean of all scores
 		expectedError    string
 	}{
 		{
-			name: "selects highest score winner",
+			name: "selects highest score winner with max aggregate score",
 			config: MaxPoolConfig{
 				TieBreaker:       "first",
 				MinScore:         0.0,
 				RequireAllScores: true,
 			},
-			scores: []float64{0.7, 0.9, 0.8},
+			scores: []float64{0.7, 0.9, 0.8}, // max = 0.9
 			candidates: []domain.Answer{
 				{ID: "answer1", Content: "First answer"},
 				{ID: "answer2", Content: "Second answer"},
 				{ID: "answer3", Content: "Third answer"},
 			},
-			expectedWinnerID: "answer2",
-			expectedScore:    0.9,
+			expectedWinnerID: "answer2", // highest individual score
+			expectedScore:    0.9,       // max of all scores
 		},
 		{
-			name: "handles equal scores with first tie breaker",
+			name: "handles equal scores with first tie breaker and returns max",
 			config: MaxPoolConfig{
 				TieBreaker:       "first",
 				MinScore:         0.0,
 				RequireAllScores: true,
 			},
-			scores: []float64{0.8, 0.8, 0.7},
+			scores: []float64{0.8, 0.8, 0.7}, // max = 0.8
 			candidates: []domain.Answer{
 				{ID: "answer1", Content: "First answer"},
 				{ID: "answer2", Content: "Second answer"},
 				{ID: "answer3", Content: "Third answer"},
 			},
-			expectedWinnerID: "answer1",
-			expectedScore:    0.8,
+			expectedWinnerID: "answer1", // first tied candidate
+			expectedScore:    0.8,       // max of all scores
 		},
 		{
 			name: "fails with tie breaker error",
@@ -65,13 +65,13 @@ func TestMaxPoolUnit_Aggregate(t *testing.T) {
 			expectedError: "multiple answers tied with highest score",
 		},
 		{
-			name: "enforces minimum score requirement",
+			name: "enforces minimum score requirement against max",
 			config: MaxPoolConfig{
 				TieBreaker:       "first",
 				MinScore:         0.9,
 				RequireAllScores: true,
 			},
-			scores:        []float64{0.8, 0.7, 0.85},
+			scores:        []float64{0.8, 0.7, 0.85}, // max = 0.85 < 0.9
 			candidates:    []domain.Answer{{ID: "a1"}, {ID: "a2"}, {ID: "a3"}},
 			expectedError: "highest score below minimum threshold",
 		},
@@ -119,11 +119,41 @@ func TestMaxPoolUnit_Aggregate(t *testing.T) {
 			candidates:    []domain.Answer{{ID: "a1"}, {ID: "a2"}, {ID: "a3"}},
 			expectedError: "invalid score at index 1",
 		},
+		{
+			name: "single candidate returns that candidate with its score as mean",
+			config: MaxPoolConfig{
+				TieBreaker:       "first",
+				MinScore:         0.0,
+				RequireAllScores: true,
+			},
+			scores: []float64{0.75},
+			candidates: []domain.Answer{
+				{ID: "single", Content: "Only answer"},
+			},
+			expectedWinnerID: "single",
+			expectedScore:    0.75, // max of [0.75] = 0.75
+		},
+		{
+			name: "passes minimum score with max above threshold",
+			config: MaxPoolConfig{
+				TieBreaker:       "first",
+				MinScore:         0.8,
+				RequireAllScores: true,
+			},
+			scores: []float64{0.9, 0.8, 0.7}, // max = 0.9 (above threshold)
+			candidates: []domain.Answer{
+				{ID: "answer1", Content: "First answer"},
+				{ID: "answer2", Content: "Second answer"},
+				{ID: "answer3", Content: "Third answer"},
+			},
+			expectedWinnerID: "answer1", // highest individual score
+			expectedScore:    0.9,       // max score (winner score)
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unit, err := NewMaxPoolUnit("test_max_pool", tt.config)
+			unit, err := NewMaxPoolUnit("test_mean_pool", tt.config)
 			require.NoError(t, err)
 
 			winner, score, err := unit.Aggregate(tt.scores, tt.candidates)
@@ -134,13 +164,13 @@ func TestMaxPoolUnit_Aggregate(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectedWinnerID, winner.ID)
-				assert.Equal(t, tt.expectedScore, score)
+				assert.InDelta(t, tt.expectedScore, score, 0.0001) // Allow for floating point precision
 			}
 		})
 	}
 }
 
-func TestMaxPoolUnit_Execute(t *testing.T) {
+func TestMeanPoolUnit_Execute(t *testing.T) {
 	tests := []struct {
 		name           string
 		config         MaxPoolConfig
@@ -175,8 +205,8 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 				require.NotNil(t, verdict, "Verdict should not be nil")
 
 				assert.Equal(t, "answer2", verdict.WinnerAnswer.ID)
-				assert.Equal(t, 0.9, verdict.AggregateScore)
-				assert.Contains(t, verdict.ID, "test_max_pool_verdict")
+				assert.Equal(t, 0.9, verdict.AggregateScore) // max of [0.8, 0.9] = 0.9
+				assert.Contains(t, verdict.ID, "test_mean_pool_verdict")
 			},
 		},
 		{
@@ -244,7 +274,7 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 
 				// Should work with truncated data (first 2 answers and scores).
 				assert.Equal(t, "answer2", verdict.WinnerAnswer.ID)
-				assert.Equal(t, 0.9, verdict.AggregateScore)
+				assert.Equal(t, 0.9, verdict.AggregateScore) // max of [0.8, 0.9] = 0.9
 			},
 		},
 		{
@@ -273,7 +303,7 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unit, err := NewMaxPoolUnit("test_max_pool", tt.config)
+			unit, err := NewMaxPoolUnit("test_mean_pool", tt.config)
 			require.NoError(t, err)
 
 			state := tt.setupState()
@@ -294,7 +324,7 @@ func TestMaxPoolUnit_Execute(t *testing.T) {
 	}
 }
 
-func TestMaxPoolUnit_Validate(t *testing.T) {
+func TestMeanPoolUnit_Validate(t *testing.T) {
 	tests := []struct {
 		name          string
 		config        MaxPoolConfig
@@ -339,7 +369,7 @@ func TestMaxPoolUnit_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unit, err := NewMaxPoolUnit("test_max_pool", tt.config)
+			unit, err := NewMaxPoolUnit("test_mean_pool", tt.config)
 			if tt.expectedError != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedError)
@@ -351,7 +381,7 @@ func TestMaxPoolUnit_Validate(t *testing.T) {
 	}
 }
 
-func TestMaxPoolUnit_Name(t *testing.T) {
+func TestMeanPoolUnit_Name(t *testing.T) {
 	config := MaxPoolConfig{
 		TieBreaker:       "first",
 		MinScore:         0.0,

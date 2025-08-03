@@ -65,7 +65,8 @@ func TestEnsemblePerformance(t *testing.T) {
 	ctx := context.Background()
 
 	// Set a deterministic seed for reproducible results
-	rand.Seed(42)
+	rng := rand.New(rand.NewSource(42))
+	_ = rng // Use this RNG if needed elsewhere
 
 	// Load the benchmark dataset
 	dataset, err := testutils.LoadBenchmarkDataset("../../testdata/benchmark_dataset/sample_benchmark_dataset.json")

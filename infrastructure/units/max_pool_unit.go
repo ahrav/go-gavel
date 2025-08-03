@@ -22,9 +22,7 @@ var _ ports.Unit = (*MaxPoolUnit)(nil)
 // It processes judge scores to select the highest-scoring answer.
 // The unit is stateless and thread-safe for concurrent execution.
 type MaxPoolUnit struct {
-	// name is the unique identifier for this unit instance.
-	name string
-	// config contains the validated configuration parameters.
+	name   string
 	config MaxPoolConfig
 }
 
@@ -45,17 +43,14 @@ type MaxPoolConfig struct {
 }
 
 // NewMaxPoolUnit creates a new MaxPoolUnit with the specified configuration.
-// The unit validates its configuration to ensure proper aggregation behavior.
-// Returns an error if configuration validation fails.
+// It returns an error if the configuration is invalid.
 func NewMaxPoolUnit(name string, config MaxPoolConfig) (*MaxPoolUnit, error) {
 	if name == "" {
 		return nil, ErrEmptyUnitName
 	}
-
 	if err := validate.Struct(config); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
-
 	return &MaxPoolUnit{
 		name:   name,
 		config: config,
@@ -63,7 +58,6 @@ func NewMaxPoolUnit(name string, config MaxPoolConfig) (*MaxPoolUnit, error) {
 }
 
 // Name returns the unique identifier for this unit instance.
-// The name is used for logging, debugging, and graph node referencing.
 func (mpu *MaxPoolUnit) Name() string { return mpu.name }
 
 // Execute aggregates judge scores using maximum selection to determine
@@ -94,21 +88,17 @@ func (mpu *MaxPoolUnit) Execute(ctx context.Context, state domain.State) (domain
 			return state, fmt.Errorf("mismatch between answers (%d) and judge scores (%d)",
 				numAnswers, numScores)
 		}
-		// Handle partial scoring case - only process up to the minimum available
 		if numScores < numAnswers {
 			numAnswers = numScores
 		}
 	}
 
-	// Extract scores for aggregation - only process valid pairs
 	scores := make([]float64, numAnswers)
-	validAnswers := make([]domain.Answer, numAnswers)
 	for i := 0; i < numAnswers; i++ {
 		scores[i] = judgeSummaries[i].Score
-		validAnswers[i] = answers[i]
 	}
 
-	winner, aggregateScore, err := mpu.Aggregate(scores, validAnswers)
+	winner, aggregateScore, err := mpu.Aggregate(scores, answers[:numAnswers])
 	if err != nil {
 		return state, fmt.Errorf("aggregation failed: %w", err)
 	}
@@ -117,7 +107,6 @@ func (mpu *MaxPoolUnit) Execute(ctx context.Context, state domain.State) (domain
 		ID:             fmt.Sprintf("%s_verdict", mpu.name),
 		WinnerAnswer:   &winner,
 		AggregateScore: aggregateScore,
-		// TODO: Add trace and budget information when available.
 	}
 
 	return domain.With(state, domain.KeyVerdict, &verdict), nil
@@ -195,35 +184,23 @@ func (mpu *MaxPoolUnit) Aggregate(
 	return candidates[winnerIdx], maxScore, nil
 }
 
-// Validate checks if the unit is properly configured and ready for execution.
-// It validates the configuration parameters to ensure proper aggregation behavior.
-// Returns nil if validation passes, or an error describing what is invalid.
+// Validate checks if the unit is properly configured.
 func (mpu *MaxPoolUnit) Validate() error {
 	if err := validate.Struct(mpu.config); err != nil {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
-
 	return nil
 }
 
-// UnmarshalParameters deserializes YAML configuration parameters into the
-// unit's configuration struct with strict validation.
-// This method enables YAML-based configuration with unknown field detection
-// to prevent configuration typos from being silently ignored.
-// Returns an error if YAML parsing fails or unknown fields are detected.
+// UnmarshalParameters deserializes YAML parameters into the unit's config.
 func (mpu *MaxPoolUnit) UnmarshalParameters(params yaml.Node) error {
 	var config MaxPoolConfig
-
-	// Use strict decoding to catch unknown fields.
 	if err := params.Decode(&config); err != nil {
 		return fmt.Errorf("failed to decode parameters: %w", err)
 	}
-
-	// Validate the decoded configuration.
 	if err := validate.Struct(config); err != nil {
 		return fmt.Errorf("parameter validation failed: %w", err)
 	}
-
 	mpu.config = config
 	return nil
 }
@@ -237,27 +214,18 @@ func DefaultMaxPoolConfig() MaxPoolConfig {
 	}
 }
 
-// CreateMaxPoolUnit is a factory function that creates a MaxPoolUnit
-// from a configuration map, following the UnitFactory pattern.
-// This function is used by the UnitRegistry for dynamic unit creation.
+// CreateMaxPoolUnit is a factory function that creates a MaxPoolUnit from a
+// configuration map, for use with the UnitRegistry.
 func CreateMaxPoolUnit(id string, config map[string]any) (*MaxPoolUnit, error) {
-	// Start with default configuration.
 	poolConfig := DefaultMaxPoolConfig()
-
-	// Override with provided values.
-	if tieBreaker, ok := config["tie_breaker"].(string); ok {
-		poolConfig.TieBreaker = TieBreaker(tieBreaker)
+	if val, ok := config["tie_breaker"].(string); ok {
+		poolConfig.TieBreaker = TieBreaker(val)
 	}
-
-	if minScore, ok := config["min_score"]; ok {
-		if val, ok := minScore.(float64); ok {
-			poolConfig.MinScore = val
-		}
+	if val, ok := config["min_score"].(float64); ok {
+		poolConfig.MinScore = val
 	}
-
-	if requireAllScores, ok := config["require_all_scores"].(bool); ok {
-		poolConfig.RequireAllScores = requireAllScores
+	if val, ok := config["require_all_scores"].(bool); ok {
+		poolConfig.RequireAllScores = val
 	}
-
 	return NewMaxPoolUnit(id, poolConfig)
 }

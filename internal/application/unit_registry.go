@@ -27,7 +27,7 @@ type DefaultUnitRegistry struct {
 // NewDefaultUnitRegistry creates a new unit registry with standard unit types
 // pre-registered and a default LLM client for units that require it.
 // The registry comes with built-in support for answerer, score_judge, verification,
-// max_pool, mean_pool, and median_pool units.
+// arithmetic_mean, max_pool, and median_pool units.
 func NewDefaultUnitRegistry(llmClient ports.LLMClient) *DefaultUnitRegistry {
 	registry := &DefaultUnitRegistry{
 		factories: make(map[string]ports.UnitFactory),
@@ -42,7 +42,7 @@ func NewDefaultUnitRegistry(llmClient ports.LLMClient) *DefaultUnitRegistry {
 
 // registerBuiltinFactories registers the standard unit types provided
 // by the evaluation framework.
-// This includes answerer, score_judge, verification, max_pool, mean_pool,
+// This includes answerer, score_judge, verification, arithmetic_mean, max_pool,
 // and median_pool units.
 func (r *DefaultUnitRegistry) registerBuiltinFactories() {
 	// Capture the current LLM client to avoid data races.
@@ -81,18 +81,18 @@ func (r *DefaultUnitRegistry) registerBuiltinFactories() {
 		return unit, nil
 	}
 
-	// Register MaxPoolUnit factory.
-	r.factories["max_pool"] = func(id string, config map[string]any) (ports.Unit, error) {
-		unit, err := units.CreateMaxPoolUnit(id, config)
+	// Register ArithmeticMeanUnit factory.
+	r.factories["arithmetic_mean"] = func(id string, config map[string]any) (ports.Unit, error) {
+		unit, err := units.CreateArithmeticMeanUnit(id, config)
 		if err != nil {
 			return nil, err
 		}
 		return unit, nil
 	}
 
-	// Register MeanPoolUnit factory.
-	r.factories["mean_pool"] = func(id string, config map[string]any) (ports.Unit, error) {
-		unit, err := units.CreateMeanPoolUnit(id, config)
+	// Register MaxPoolUnit factory.
+	r.factories["max_pool"] = func(id string, config map[string]any) (ports.Unit, error) {
+		unit, err := units.CreateMaxPoolUnit(id, config)
 		if err != nil {
 			return nil, err
 		}

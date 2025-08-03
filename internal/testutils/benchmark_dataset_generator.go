@@ -17,7 +17,8 @@ import (
 // NOTE: This is for testing purposes only. For production benchmarks, a real
 // dataset with proper licensing must be sourced.
 func GenerateSampleBenchmarkDataset(size int, seed int64) *BenchmarkDataset {
-	rng := rand.New(rand.NewSource(seed))
+	// G404: Intentionally using weak RNG for deterministic test data generation
+	rng := rand.New(rand.NewSource(seed)) //nolint:gosec // Fixed seed for reproducible tests
 
 	dataset := &BenchmarkDataset{
 		Metadata: DatasetMetadata{

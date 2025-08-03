@@ -68,7 +68,7 @@ type DatasetMetadata struct {
 // LoadBenchmarkDataset loads a benchmark dataset from a JSON file.
 // It validates the dataset structure and ensures all required fields are present.
 func LoadBenchmarkDataset(path string) (*BenchmarkDataset, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Controlled file access in test utilities
 	if err != nil {
 		return nil, fmt.Errorf("failed to read dataset file: %w", err)
 	}
@@ -88,7 +88,7 @@ func LoadBenchmarkDataset(path string) (*BenchmarkDataset, error) {
 // LoadBenchmarkDatasetNoValidation loads a benchmark dataset from a JSON file
 // without full validation. This is primarily for testing purposes.
 func LoadBenchmarkDatasetNoValidation(path string) (*BenchmarkDataset, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Controlled file access in test utilities
 	if err != nil {
 		return nil, fmt.Errorf("failed to read dataset file: %w", err)
 	}
@@ -297,7 +297,7 @@ func isCompatibleLicense(license string) bool {
 func SaveBenchmarkDataset(dataset *BenchmarkDataset, path string) error {
 	// Ensure the directory exists
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -307,7 +307,7 @@ func SaveBenchmarkDataset(dataset *BenchmarkDataset, path string) error {
 		return fmt.Errorf("failed to marshal dataset: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write dataset file: %w", err)
 	}
 
