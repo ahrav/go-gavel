@@ -5,12 +5,10 @@ package units
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
 
-	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ahrav/go-gavel/internal/domain"
@@ -18,36 +16,6 @@ import (
 )
 
 var _ ports.Unit = (*MaxPoolUnit)(nil)
-
-// TieBreaker represents the strategy for handling equal scores.
-type TieBreaker string
-
-// Supported tie-breaking strategies.
-const (
-	// TieFirst selects the first answer with the highest score.
-	TieFirst TieBreaker = "first"
-	// TieRandom randomly selects among answers with the highest score.
-	TieRandom TieBreaker = "random"
-	// TieError returns an error when multiple answers have the highest score.
-	TieError TieBreaker = "error"
-)
-
-// Common errors returned by MaxPoolUnit.
-var (
-	// ErrTie is returned when multiple answers have the highest score and TieError is configured.
-	ErrTie = errors.New("multiple answers tied with highest score")
-	// ErrBelowMinScore is returned when the highest score is below the minimum threshold.
-	ErrBelowMinScore = errors.New("highest score below minimum threshold")
-	// ErrNoScores is returned when no scores are provided for aggregation.
-	ErrNoScores = errors.New("no scores provided for aggregation")
-	// ErrEmptyUnitName is returned when unit name is empty.
-	ErrEmptyUnitName = errors.New("unit name cannot be empty")
-	// ErrScoreMismatch is returned when scores and candidates lengths don't match.
-	ErrScoreMismatch = errors.New("scores and candidates length mismatch")
-)
-
-// Package-level validator instance for configuration validation.
-var validate = validator.New()
 
 // MaxPoolUnit implements the Aggregator interface using maximum selection
 // to determine the winning answer and aggregate score.

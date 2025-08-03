@@ -26,7 +26,8 @@ type DefaultUnitRegistry struct {
 
 // NewDefaultUnitRegistry creates a new unit registry with standard unit types
 // pre-registered and a default LLM client for units that require it.
-// The registry comes with built-in support for answerer, score_judge, and max_pool units.
+// The registry comes with built-in support for answerer, score_judge, verification,
+// max_pool, mean_pool, and median_pool units.
 func NewDefaultUnitRegistry(llmClient ports.LLMClient) *DefaultUnitRegistry {
 	registry := &DefaultUnitRegistry{
 		factories: make(map[string]ports.UnitFactory),
@@ -41,7 +42,8 @@ func NewDefaultUnitRegistry(llmClient ports.LLMClient) *DefaultUnitRegistry {
 
 // registerBuiltinFactories registers the standard unit types provided
 // by the evaluation framework.
-// This includes answerer, score_judge, max_pool, and verification units.
+// This includes answerer, score_judge, verification, max_pool, mean_pool,
+// and median_pool units.
 func (r *DefaultUnitRegistry) registerBuiltinFactories() {
 	// Capture the current LLM client to avoid data races.
 	client := r.llmClient
@@ -80,7 +82,7 @@ func (r *DefaultUnitRegistry) registerBuiltinFactories() {
 	}
 
 	// Register MaxPoolUnit factory.
-	maxPoolFactory := func(id string, config map[string]any) (ports.Unit, error) {
+	r.factories["max_pool"] = func(id string, config map[string]any) (ports.Unit, error) {
 		unit, err := units.CreateMaxPoolUnit(id, config)
 		if err != nil {
 			return nil, err
@@ -88,9 +90,23 @@ func (r *DefaultUnitRegistry) registerBuiltinFactories() {
 		return unit, nil
 	}
 
-	// Register both "max_pool" and "mean_pool" (for backwards compatibility)
-	r.factories["max_pool"] = maxPoolFactory
-	r.factories["mean_pool"] = maxPoolFactory // Alias for backwards compatibility
+	// Register MeanPoolUnit factory.
+	r.factories["mean_pool"] = func(id string, config map[string]any) (ports.Unit, error) {
+		unit, err := units.CreateMeanPoolUnit(id, config)
+		if err != nil {
+			return nil, err
+		}
+		return unit, nil
+	}
+
+	// Register MedianPoolUnit factory.
+	r.factories["median_pool"] = func(id string, config map[string]any) (ports.Unit, error) {
+		unit, err := units.CreateMedianPoolUnit(id, config)
+		if err != nil {
+			return nil, err
+		}
+		return unit, nil
+	}
 
 }
 
