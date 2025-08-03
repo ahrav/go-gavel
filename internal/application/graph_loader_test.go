@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ahrav/go-gavel/infrastructure/llm"
 	"github.com/ahrav/go-gavel/internal/domain"
 	"github.com/ahrav/go-gavel/internal/ports"
 )
@@ -51,6 +52,24 @@ func (m *mockUnitRegistry) GetSupportedTypes() []string {
 	return []string{"llm_judge", "code_analyzer", "metrics_collector", "custom"}
 }
 
+// mockCoreLLMAdapterGL adapts mockLLMClient to implement llm.CoreLLM
+type mockCoreLLMAdapterGL struct {
+	client *mockLLMClient
+}
+
+func (m *mockCoreLLMAdapterGL) DoRequest(ctx context.Context, prompt string, opts map[string]any) (string, int, int, error) {
+	response, tokensIn, tokensOut, err := m.client.CompleteWithUsage(ctx, prompt, opts)
+	return response, tokensIn, tokensOut, err
+}
+
+func (m *mockCoreLLMAdapterGL) GetModel() string {
+	return m.client.GetModel()
+}
+
+func (m *mockCoreLLMAdapterGL) SetModel(model string) {
+	m.client.model = model
+}
+
 // mockUnit implements ports.Unit for testing
 type mockUnit struct {
 	id       string
@@ -88,11 +107,12 @@ metadata:
   name: "simple-graph"
 units:
   - id: unit1
-    type: llm_judge
+    type: score_judge
     budget:
       max_tokens: 1000
     parameters:
-      prompt: "Test prompt"
+      judge_prompt: "Test prompt"
+      score_scale: "0.0-1.0"
 graph:
   edges: []
 `,
@@ -113,17 +133,18 @@ metadata:
   name: "pipeline-graph"
 units:
   - id: analyzer1
-    type: code_analyzer
+    type: answerer
     budget:
       max_tokens: 1000
     parameters:
       language: "go"
   - id: judge1
-    type: llm_judge
+    type: score_judge
     budget:
       max_tokens: 2000
     parameters:
-      prompt: "Evaluate code"
+      judge_prompt: "Evaluate code"
+      score_scale: "0.0-1.0"
 graph:
   pipelines:
     - id: pipeline1
@@ -274,18 +295,18 @@ metadata:
   name: "invalid-params"
 units:
   - id: judge1
-    type: llm_judge
+    type: score_judge
     budget:
       max_tokens: 1000
     parameters:
-      # Missing required 'prompt' parameter
+      # Missing required 'judge_prompt' parameter
       temperature: 0.8
 graph:
   edges: []
 `,
 			setupMock: func(m *mockUnitRegistry) {},
 			wantErr:   true,
-			errMsg:    "prompt",
+			errMsg:    "judge_prompt",
 		},
 		{
 			name: "handles unit creation error",
@@ -339,8 +360,30 @@ graph:
 				tt.setupMock(mockRegistry)
 			}
 
+			// Create provider registry
+			config := llm.RegistryConfig{
+				DefaultProvider: "openai",
+				Providers:       llm.DefaultProviders,
+			}
+			registry, err := llm.NewRegistry(config)
+			require.NoError(t, err)
+
+			// Register mock provider factory
+			mockLLMClient := &mockLLMClient{model: "test-model"}
+			llm.RegisterProviderFactory("openai", func(cfg llm.ClientConfig) (llm.CoreLLM, error) {
+				// Create an adapter to make mockLLMClient implement CoreLLM
+				return &mockCoreLLMAdapterGL{client: mockLLMClient}, nil
+			})
+
+			// Register the client
+			err = registry.RegisterClient("openai", llm.ClientConfig{
+				APIKey: "test-key",
+				Model:  "test-model",
+			})
+			require.NoError(t, err)
+
 			// Create graph loader
-			loader, err := NewGraphLoader(mockRegistry)
+			loader, err := NewGraphLoader(mockRegistry, registry)
 			require.NoError(t, err)
 
 			// Load graph
@@ -378,7 +421,28 @@ graph:
 
 	// Create loader
 	mockRegistry := newMockUnitRegistry()
-	loader, err := NewGraphLoader(mockRegistry)
+	config := llm.RegistryConfig{
+		DefaultProvider: "openai",
+		Providers:       llm.DefaultProviders,
+	}
+	registry, err := llm.NewRegistry(config)
+	require.NoError(t, err)
+	mockLLMClient := &mockLLMClient{model: "test-model"}
+
+	// Register mock provider factory
+	llm.RegisterProviderFactory("openai", func(cfg llm.ClientConfig) (llm.CoreLLM, error) {
+		// Create an adapter to make mockLLMClient implement CoreLLM
+		return &mockCoreLLMAdapterGL{client: mockLLMClient}, nil
+	})
+
+	// Register the client
+	err = registry.RegisterClient("openai", llm.ClientConfig{
+		APIKey: "test-key",
+		Model:  "test-model",
+	})
+	require.NoError(t, err)
+
+	loader, err := NewGraphLoader(mockRegistry, registry)
 	require.NoError(t, err)
 
 	// Load graph first time
@@ -417,7 +481,7 @@ metadata:
     env: "prod"
 units:
   - id: preprocess1
-    type: code_analyzer
+    type: answerer
     budget:
       max_tokens: 1000
       timeout_seconds: 30
@@ -425,27 +489,29 @@ units:
       language: "python"
       rules: ["pep8", "pylint"]
   - id: preprocess2
-    type: metrics_collector
+    type: max_pool
     budget:
       max_tokens: 500
     parameters:
       metrics: ["complexity", "coverage"]
   - id: judge1
-    type: llm_judge
+    type: score_judge
     budget:
       max_tokens: 5000
       max_cost: 10.0
     parameters:
-      prompt: "Evaluate the code quality"
+      judge_prompt: "Evaluate the code quality"
+      score_scale: "0.0-1.0"
       temperature: 0.7
       model: "gpt-4"
   - id: judge2
-    type: llm_judge
+    type: score_judge
     budget:
       max_tokens: 5000
       max_cost: 10.0
     parameters:
-      prompt: "Evaluate the performance"
+      judge_prompt: "Evaluate the performance"
+      score_scale: "0.0-1.0"
       temperature: 0.7
       model: "gpt-4"
   - id: aggregator
@@ -471,7 +537,28 @@ graph:
 
 	// Create loader
 	mockRegistry := newMockUnitRegistry()
-	loader, err := NewGraphLoader(mockRegistry)
+	config := llm.RegistryConfig{
+		DefaultProvider: "openai",
+		Providers:       llm.DefaultProviders,
+	}
+	registry, err := llm.NewRegistry(config)
+	require.NoError(t, err)
+	mockLLMClient := &mockLLMClient{model: "test-model"}
+
+	// Register mock provider factory
+	llm.RegisterProviderFactory("openai", func(cfg llm.ClientConfig) (llm.CoreLLM, error) {
+		// Create an adapter to make mockLLMClient implement CoreLLM
+		return &mockCoreLLMAdapterGL{client: mockLLMClient}, nil
+	})
+
+	// Register the client
+	err = registry.RegisterClient("openai", llm.ClientConfig{
+		APIKey: "test-key",
+		Model:  "test-model",
+	})
+	require.NoError(t, err)
+
+	loader, err := NewGraphLoader(mockRegistry, registry)
 	require.NoError(t, err)
 
 	// Load graph

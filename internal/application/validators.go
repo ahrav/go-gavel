@@ -22,12 +22,14 @@ func ValidateUnitParameters(unitType string, params yaml.Node) error {
 	}
 
 	switch unitType {
-	case "llm_judge":
-		return validateLLMJudgeParams(paramMap)
-	case "code_analyzer":
-		return validateCodeAnalyzerParams(paramMap)
-	case "metrics_collector":
-		return validateMetricsCollectorParams(paramMap)
+	case "score_judge":
+		return validateScoreJudgeParams(paramMap)
+	case "answerer":
+		return validateAnswererParams(paramMap)
+	case "verification":
+		return validateVerificationParams(paramMap)
+	case "arithmetic_mean", "max_pool", "median_pool":
+		return validatePoolParams(paramMap)
 	case "custom":
 		// Custom units have flexible validation
 		return nil
@@ -36,25 +38,27 @@ func ValidateUnitParameters(unitType string, params yaml.Node) error {
 	}
 }
 
-// validateLLMJudgeParams validates parameters for LLM judge evaluation units,
-// ensuring required prompt is provided and optional parameters meet constraints.
-// validateLLMJudgeParams checks for required prompt field,
+// validateScoreJudgeParams validates parameters for score judge evaluation units,
+// ensuring required judge_prompt is provided and optional parameters meet constraints.
+// validateScoreJudgeParams checks for required judge_prompt field,
 // validates temperature is between 0 and 2,
 // and ensures model name is non-empty if specified.
-// validateLLMJudgeParams returns an error if any validation rule fails.
-func validateLLMJudgeParams(params map[string]any) error {
-	// Required fields
-	if _, ok := params["prompt"]; !ok {
-		return fmt.Errorf("llm_judge requires 'prompt' parameter")
+// validateScoreJudgeParams returns an error if any validation rule fails.
+func validateScoreJudgeParams(params map[string]any) error {
+	if _, ok := params["judge_prompt"]; !ok {
+		return fmt.Errorf("score_judge requires 'judge_prompt' parameter")
 	}
 
-	// Validate prompt is a string
-	prompt, ok := params["prompt"].(string)
-	if !ok {
-		return fmt.Errorf("prompt must be a string")
+	if _, ok := params["score_scale"]; !ok {
+		return fmt.Errorf("score_judge requires 'score_scale' parameter")
 	}
-	if prompt == "" {
-		return fmt.Errorf("prompt cannot be empty")
+
+	judgePrompt, ok := params["judge_prompt"].(string)
+	if !ok {
+		return fmt.Errorf("judge_prompt must be a string")
+	}
+	if judgePrompt == "" {
+		return fmt.Errorf("judge_prompt cannot be empty")
 	}
 
 	// Optional temperature validation
@@ -81,84 +85,6 @@ func validateLLMJudgeParams(params map[string]any) error {
 		}
 		if modelStr == "" {
 			return fmt.Errorf("model cannot be empty")
-		}
-	}
-
-	return nil
-}
-
-// validateCodeAnalyzerParams validates parameters for code analyzer units,
-// ensuring the specified programming language is supported
-// and analysis rules are properly formatted.
-// validateCodeAnalyzerParams requires a language parameter
-// from the supported list and validates optional rules array
-// contains only string elements.
-// validateCodeAnalyzerParams returns an error if language is unsupported
-// or rules are malformed.
-func validateCodeAnalyzerParams(params map[string]any) error {
-	// Required fields
-	if _, ok := params["language"]; !ok {
-		return fmt.Errorf("code_analyzer requires 'language' parameter")
-	}
-
-	// Validate language
-	lang, ok := params["language"].(string)
-	if !ok {
-		return fmt.Errorf("language must be a string")
-	}
-
-	supportedLangs := []string{"go", "python", "javascript", "typescript", "java", "rust"}
-	if !slices.Contains(supportedLangs, strings.ToLower(lang)) {
-		return fmt.Errorf("unsupported language: %s", lang)
-	}
-
-	// Optional rules validation
-	if rules, ok := params["rules"]; ok {
-		rulesSlice, ok := rules.([]any)
-		if !ok {
-			return fmt.Errorf("rules must be an array")
-		}
-		for i, rule := range rulesSlice {
-			if _, ok := rule.(string); !ok {
-				return fmt.Errorf("rule at index %d must be a string", i)
-			}
-		}
-	}
-
-	return nil
-}
-
-// validateMetricsCollectorParams validates parameters for metrics collection
-// units, ensuring at least one supported metric type is specified.
-// validateMetricsCollectorParams requires a non-empty metrics array
-// where each element must be a supported metric type
-// (complexity, coverage, performance, security, maintainability).
-// validateMetricsCollectorParams returns an error if metrics array is
-// empty or contains unsupported metric types.
-func validateMetricsCollectorParams(params map[string]any) error {
-	// Required fields
-	if _, ok := params["metrics"]; !ok {
-		return fmt.Errorf("metrics_collector requires 'metrics' parameter")
-	}
-
-	// Validate metrics array
-	metrics, ok := params["metrics"].([]any)
-	if !ok {
-		return fmt.Errorf("metrics must be an array")
-	}
-
-	if len(metrics) == 0 {
-		return fmt.Errorf("metrics array cannot be empty")
-	}
-
-	supportedMetrics := []string{"complexity", "coverage", "performance", "security", "maintainability"}
-	for i, metric := range metrics {
-		metricStr, ok := metric.(string)
-		if !ok {
-			return fmt.Errorf("metric at index %d must be a string", i)
-		}
-		if !slices.Contains(supportedMetrics, strings.ToLower(metricStr)) {
-			return fmt.Errorf("unsupported metric: %s", metricStr)
 		}
 	}
 
@@ -270,6 +196,11 @@ func RegisterGraphValidators(v *validator.Validate) error {
 		return fmt.Errorf("failed to register condparams validator: %w", err)
 	}
 
+	// Register model string validator for provider/model format.
+	if err := v.RegisterValidation("modelformat", validateModelFormat); err != nil {
+		return fmt.Errorf("failed to register modelformat validator: %w", err)
+	}
+
 	return nil
 }
 
@@ -293,4 +224,59 @@ func validateConditionParametersTag(fl validator.FieldLevel) bool {
 	// This would be used as a struct tag validator
 	// For now, return true as the actual validation happens elsewhere
 	return true
+}
+
+// validateModelFormat validates that a model string matches the required format:
+// ^[a-z0-9]+/[A-Za-z0-9\-_\.]+(@[A-Za-z0-9\-_\.]+)?$
+// This ensures the model follows the pattern provider/model or provider/model@version.
+func validateModelFormat(fl validator.FieldLevel) bool {
+	model := fl.Field().String()
+
+	if model == "" {
+		return true
+	}
+
+	// Basic validation - must contain a slash if not empty.
+	for i, ch := range model {
+		if ch == '/' {
+			if i == 0 {
+				return false // provider name cannot be empty
+			}
+			if i == len(model)-1 {
+				return false // model name cannot be empty
+			}
+			return true
+		}
+	}
+
+	return false
+}
+
+// validateAnswererParams validates parameters for answerer units.
+func validateAnswererParams(params map[string]any) error {
+	// Answerer units don't have required parameters
+	// Optional: num_answers, prompt, temperature, max_tokens
+	if numAnswers, ok := params["num_answers"]; ok {
+		if num, ok := numAnswers.(int); ok {
+			if num < 1 {
+				return fmt.Errorf("num_answers must be at least 1")
+			}
+		}
+	}
+	return nil
+}
+
+// validateVerificationParams validates parameters for verification units.
+func validateVerificationParams(params map[string]any) error {
+	if _, ok := params["prompt"]; !ok {
+		return fmt.Errorf("verification requires 'prompt' parameter")
+	}
+	return nil
+}
+
+// validatePoolParams validates parameters for pooling units (max_pool, median_pool, arithmetic_mean).
+func validatePoolParams(params map[string]any) error {
+	// Pool units typically don't have required parameters
+	// They work with scores from previous units
+	return nil
 }

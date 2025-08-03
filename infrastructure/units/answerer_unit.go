@@ -15,7 +15,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ahrav/go-gavel/infrastructure/llm"
 	"github.com/ahrav/go-gavel/internal/domain"
 	"github.com/ahrav/go-gavel/internal/ports"
 )
@@ -105,8 +104,6 @@ func NewAnswererUnit(
 		return nil, ErrLLMClientNil
 	}
 
-	retryClient := llm.NewRetryingLLMClient(llmClient, llm.DefaultRetryConfig())
-
 	if err := answererValidator.Struct(config); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrConfigValidation, err)
 	}
@@ -119,7 +116,7 @@ func NewAnswererUnit(
 	return &AnswererUnit{
 		name:           name,
 		config:         config,
-		llmClient:      retryClient,
+		llmClient:      llmClient,
 		promptTemplate: tmpl,
 	}, nil
 }

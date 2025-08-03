@@ -9,7 +9,27 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/ahrav/go-gavel/infrastructure/llm"
 )
+
+// mockCoreLLMAdapter adapts mockLLMClient to implement llm.CoreLLM
+type mockCoreLLMAdapter struct {
+	client *mockLLMClient
+}
+
+func (m *mockCoreLLMAdapter) DoRequest(ctx context.Context, prompt string, opts map[string]any) (string, int, int, error) {
+	response, tokensIn, tokensOut, err := m.client.CompleteWithUsage(ctx, prompt, opts)
+	return response, tokensIn, tokensOut, err
+}
+
+func (m *mockCoreLLMAdapter) GetModel() string {
+	return m.client.GetModel()
+}
+
+func (m *mockCoreLLMAdapter) SetModel(model string) {
+	m.client.model = model
+}
 
 // FuzzGraphLoader_ParseYAML tests the YAML parsing with random inputs
 func FuzzGraphLoader_ParseYAML(f *testing.F) {
@@ -113,7 +133,30 @@ graph:
 	}
 
 	mockRegistry := newMockUnitRegistry()
-	loader, err := NewGraphLoader(mockRegistry)
+	config := llm.RegistryConfig{
+		DefaultProvider: "openai",
+		Providers:       llm.DefaultProviders,
+	}
+	registry, err := llm.NewRegistry(config)
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	// Register mock provider factory
+	mockLLMClient := &mockLLMClient{model: "test-model"}
+	llm.RegisterProviderFactory("openai", func(cfg llm.ClientConfig) (llm.CoreLLM, error) {
+		// Create an adapter to make mockLLMClient implement CoreLLM
+		return &mockCoreLLMAdapter{client: mockLLMClient}, nil
+	})
+
+	// Register the client
+	if err := registry.RegisterClient("openai", llm.ClientConfig{
+		APIKey: "test-key",
+		Model:  "test-model",
+	}); err != nil {
+		f.Fatal(err)
+	}
+	loader, err := NewGraphLoader(mockRegistry, registry)
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -223,7 +266,30 @@ graph:
 	}
 
 	mockRegistry := newMockUnitRegistry()
-	loader, err := NewGraphLoader(mockRegistry)
+	config := llm.RegistryConfig{
+		DefaultProvider: "openai",
+		Providers:       llm.DefaultProviders,
+	}
+	registry, err := llm.NewRegistry(config)
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	// Register mock provider factory
+	mockLLMClient := &mockLLMClient{model: "test-model"}
+	llm.RegisterProviderFactory("openai", func(cfg llm.ClientConfig) (llm.CoreLLM, error) {
+		// Create an adapter to make mockLLMClient implement CoreLLM
+		return &mockCoreLLMAdapter{client: mockLLMClient}, nil
+	})
+
+	// Register the client
+	if err := registry.RegisterClient("openai", llm.ClientConfig{
+		APIKey: "test-key",
+		Model:  "test-model",
+	}); err != nil {
+		f.Fatal(err)
+	}
+	loader, err := NewGraphLoader(mockRegistry, registry)
 	if err != nil {
 		f.Fatal(err)
 	}

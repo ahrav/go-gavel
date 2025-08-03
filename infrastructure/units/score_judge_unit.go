@@ -14,7 +14,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ahrav/go-gavel/infrastructure/llm"
 	"github.com/ahrav/go-gavel/internal/domain"
 	"github.com/ahrav/go-gavel/internal/ports"
 )
@@ -235,8 +234,6 @@ func NewScoreJudgeUnit(name string, llmClient ports.LLMClient, config ScoreJudge
 		return nil, fmt.Errorf("LLM client cannot be nil")
 	}
 
-	retryClient := llm.NewRetryingLLMClient(llmClient, llm.DefaultRetryConfig())
-
 	v := validator.New()
 	if err := validateConfig(v, config); err != nil {
 		return nil, err
@@ -251,7 +248,7 @@ func NewScoreJudgeUnit(name string, llmClient ports.LLMClient, config ScoreJudge
 	return &ScoreJudgeUnit{
 		name:           name,
 		config:         config,
-		llmClient:      retryClient,
+		llmClient:      llmClient,
 		validator:      v,
 		promptTemplate: tmpl,
 	}, nil

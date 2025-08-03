@@ -13,7 +13,6 @@ import (
 	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ahrav/go-gavel/infrastructure/llm"
 	"github.com/ahrav/go-gavel/internal/domain"
 	"github.com/ahrav/go-gavel/internal/ports"
 )
@@ -163,16 +162,14 @@ func NewVerificationUnit(
 		return nil, fmt.Errorf("unit %s: LLM client cannot be nil", name)
 	}
 
-	retryClient := llm.NewRetryingLLMClient(llmClient, llm.DefaultRetryConfig())
-
 	unit := &VerificationUnit{
 		name:      name,
 		config:    config,
-		llmClient: retryClient,
+		llmClient: llmClient,
 		validator: validator.New(),
 	}
 
-	tmpl, err := unit.validateAndCompileConfig(config, retryClient, name)
+	tmpl, err := unit.validateAndCompileConfig(config, llmClient, name)
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +482,7 @@ func (vu *VerificationUnit) Execute(ctx context.Context, state domain.State) (do
 
 	response, tokensIn, tokensOut, err := vu.callVerificationLLM(ctx, prompt)
 	if err != nil {
-		return state, err
+		return state, fmt.Errorf("unit %s: LLM call failed: %w", vu.name, err)
 	}
 
 	verificationResp, err := vu.parseLLMResponse(response)

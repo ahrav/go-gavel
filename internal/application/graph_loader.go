@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gopkg.in/yaml.v3"
 
+	"github.com/ahrav/go-gavel/infrastructure/llm"
 	"github.com/ahrav/go-gavel/internal/ports"
 )
 
@@ -30,6 +31,9 @@ type GraphLoader struct {
 	// unitRegistry provides factory methods for creating evaluation units
 	// based on their type and configuration parameters.
 	unitRegistry ports.UnitRegistry
+	// providerRegistry manages provider-specific LLM clients and injects
+	// the correct client based on the unit's model field.
+	providerRegistry *llm.Registry
 	// cache stores compiled graphs indexed by SHA256 hash of source YAML
 	// to avoid recompilation of identical configurations.
 	// WARNING: Cached graphs MUST NOT be mutated. The Graph methods
@@ -48,7 +52,7 @@ type GraphLoader struct {
 // NewGraphLoader registers custom validators for semantic validation
 // beyond basic struct field validation.
 // NewGraphLoader returns an error if validator registration fails.
-func NewGraphLoader(unitRegistry ports.UnitRegistry) (*GraphLoader, error) {
+func NewGraphLoader(unitRegistry ports.UnitRegistry, providerRegistry *llm.Registry) (*GraphLoader, error) {
 	v := validator.New()
 
 	// Register custom validators for semantic validation beyond struct tags.
@@ -56,10 +60,15 @@ func NewGraphLoader(unitRegistry ports.UnitRegistry) (*GraphLoader, error) {
 		return nil, fmt.Errorf("failed to register validators: %w", err)
 	}
 
+	if providerRegistry == nil {
+		return nil, fmt.Errorf("provider registry cannot be nil")
+	}
+
 	return &GraphLoader{
-		validator:    v,
-		unitRegistry: unitRegistry,
-		cache:        make(map[string]*Graph),
+		validator:        v,
+		unitRegistry:     unitRegistry,
+		providerRegistry: providerRegistry,
+		cache:            make(map[string]*Graph),
 	}, nil
 }
 
@@ -203,6 +212,12 @@ func (gl *GraphLoader) validateSemantics(config *GraphConfig) error {
 
 		if err := ValidateUnitParameters(unit.Type, unit.Parameters); err != nil {
 			return fmt.Errorf("unit %s parameter validation failed: %w", unit.ID, err)
+		}
+
+		if unit.Model != "" {
+			if err := gl.validateModelProvider(unit.Model); err != nil {
+				return fmt.Errorf("unit %s model validation failed: %w", unit.ID, err)
+			}
 		}
 	}
 
@@ -385,6 +400,15 @@ func (gl *GraphLoader) createUnit(config UnitConfig) (ports.Unit, error) {
 		unitConfig[k] = v
 	}
 
+	// Get the appropriate LLMClient based on the model field
+	if config.Model != "" || gl.isLLMUnit(config.Type) {
+		llmClient, err := gl.providerRegistry.GetClient(config.Model)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get LLM client for model %q: %w", config.Model, err)
+		}
+		unitConfig["llmClient"] = llmClient
+	}
+
 	// Use the unit registry to create the unit.
 	unit, err := gl.unitRegistry.CreateUnit(config.Type, config.ID, unitConfig)
 	if err != nil {
@@ -392,6 +416,13 @@ func (gl *GraphLoader) createUnit(config UnitConfig) (ports.Unit, error) {
 	}
 
 	return unit, nil
+}
+
+// isLLMUnit checks if a unit type requires an LLM client.
+func (gl *GraphLoader) isLLMUnit(unitType string) bool {
+	// Currently, only llm_judge units require an LLM client
+	// This can be extended as more LLM-based unit types are added
+	return unitType == "llm_judge"
 }
 
 // calculateConfigHash computes the SHA256 hash of a normalized GraphConfig
@@ -476,4 +507,21 @@ func validateSemver(fl validator.FieldLevel) bool {
 	var major, minor, patch int
 	n, err := fmt.Sscanf(value, "%d.%d.%d", &major, &minor, &patch)
 	return err == nil && n == 3
+}
+
+// validateModelProvider checks if the provider referenced in the model string
+// is registered in the llm.Registry.
+func (gl *GraphLoader) validateModelProvider(model string) error {
+	// Skip validation if model is empty (will use default provider)
+	if model == "" {
+		return nil
+	}
+
+	// Try to get the client for the model to ensure provider is registered
+	_, err := gl.providerRegistry.GetClient(model)
+	if err != nil {
+		return fmt.Errorf("provider validation failed: %w", err)
+	}
+
+	return nil
 }
