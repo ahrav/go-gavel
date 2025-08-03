@@ -191,6 +191,37 @@ func (r *DefaultUnitRegistry) SetLLMClient(client ports.LLMClient) {
 	r.registerBuiltinFactories()
 }
 
+// RegisterMiddlewareFactory registers a middleware factory function that can wrap
+// other units created by this registry. This allows for dynamic registration
+// of middleware factories without creating import cycles.
+func (r *DefaultUnitRegistry) RegisterMiddlewareFactory(
+	unitType string,
+	middlewareFactory func(id string, config map[string]any, unitFactory func(string, string, map[string]any) (ports.Unit, error)) (ports.Unit, error),
+) error {
+	if unitType == "" {
+		return fmt.Errorf("unit type cannot be empty")
+	}
+
+	if middlewareFactory == nil {
+		return fmt.Errorf("middleware factory function cannot be nil")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Create a factory that uses this registry to create wrapped units.
+	r.factories[unitType] = func(id string, config map[string]any) (ports.Unit, error) {
+		// Create a factory function for the wrapped unit that uses this registry.
+		unitFactory := func(unitType, unitID string, unitConfig map[string]any) (ports.Unit, error) {
+			return r.CreateUnit(unitType, unitID, unitConfig)
+		}
+
+		return middlewareFactory(id, config, unitFactory)
+	}
+
+	return nil
+}
+
 // GetLLMClient returns the current default LLM client.
 // This is useful for debugging and testing purposes.
 func (r *DefaultUnitRegistry) GetLLMClient() ports.LLMClient {
