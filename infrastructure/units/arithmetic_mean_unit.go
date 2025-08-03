@@ -17,16 +17,16 @@ import (
 
 var _ ports.Unit = (*ArithmeticMeanUnit)(nil)
 
-// ArithmeticMeanUnit implements an Aggregator that selects the candidate with the
-// highest individual score and returns that candidate's score as the aggregate score.
+// ArithmeticMeanUnit implements an Aggregator that calculates the arithmetic mean
+// of all judge scores to produce a blended evaluation result.
 //
-// This unit implements the "best individual wins" strategy where:
-// - The candidate with the highest score is selected as the winner
-// - The aggregate score is the winner's actual score (not a calculated mean)
+// This unit implements the arithmetic mean aggregation strategy where:
+// - The aggregate score is the arithmetic mean (average) of all judge scores
+// - The winner is still the candidate with the highest individual score
+// - Tie-breaking rules apply when multiple candidates have the same highest score
 //
-// This fulfills Story 1.3 MVP requirements - a basic aggregator implementation.
-// Story 1.6 defines a true arithmetic mean aggregator for multi-judge scenarios,
-// which would be a separate implementation that calculates the mean of all scores.
+// This fulfills Story 1.6 requirements for averaging scores from multiple judges
+// to get a blended result while maintaining winner selection based on individual performance.
 //
 // The unit is stateless and thread-safe for concurrent execution.
 type ArithmeticMeanUnit struct {
@@ -75,8 +75,9 @@ func NewArithmeticMeanUnit(name string, config ArithmeticMeanConfig) (*Arithmeti
 func (mpu *ArithmeticMeanUnit) Name() string { return mpu.name }
 
 // Execute aggregates judge scores using arithmetic mean calculation. It retrieves answers
-// and scores from the state, selects the highest-scoring candidate as the
-// winner, and produces a Verdict with the mean of all scores.
+// and scores from the state, calculates the arithmetic mean of all scores,
+// selects the highest-scoring candidate as the winner, and produces a Verdict
+// with the calculated mean as the aggregate score.
 func (mpu *ArithmeticMeanUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
 	answers, ok := domain.Get(state, domain.KeyAnswers)
 	if !ok {
@@ -129,9 +130,9 @@ func (mpu *ArithmeticMeanUnit) Execute(ctx context.Context, state domain.State) 
 	return domain.With(state, domain.KeyVerdict, &verdict), nil
 }
 
-// Aggregate implements the domain.Aggregator interface. It selects the
-// candidate with the highest individual score and returns that candidate's
-// score as the aggregate score.
+// Aggregate implements the domain.Aggregator interface. It calculates the
+// arithmetic mean of all scores as the aggregate score and selects the
+// candidate with the highest individual score as the winner.
 func (mpu *ArithmeticMeanUnit) Aggregate(
 	scores []float64,
 	candidates []domain.Answer,
@@ -144,6 +145,8 @@ func (mpu *ArithmeticMeanUnit) Aggregate(
 			ErrScoreMismatch, len(scores), len(candidates))
 	}
 
+	// Calculate arithmetic mean of all scores.
+	var sum float64
 	var winnerIdx int
 	var maxScore = -1.0
 	var tieIndices []int
@@ -152,6 +155,10 @@ func (mpu *ArithmeticMeanUnit) Aggregate(
 		if math.IsNaN(score) || math.IsInf(score, 0) {
 			return domain.Answer{}, 0, fmt.Errorf("invalid score at index %d: %f", i, score)
 		}
+
+		sum += score
+
+		// Track highest score for winner selection.
 		if score > maxScore {
 			maxScore = score
 			winnerIdx = i
@@ -161,12 +168,14 @@ func (mpu *ArithmeticMeanUnit) Aggregate(
 		}
 	}
 
-	// Check if the winner's score meets the minimum requirement
-	if maxScore < mpu.config.MinScore {
-		return domain.Answer{}, 0, fmt.Errorf("%w: highest=%.3f, minimum=%.3f",
-			ErrBelowMinScore, maxScore, mpu.config.MinScore)
+	mean := sum / float64(len(scores))
+
+	if mean < mpu.config.MinScore {
+		return domain.Answer{}, 0, fmt.Errorf("%w: mean=%.3f, minimum=%.3f",
+			ErrBelowMinScore, mean, mpu.config.MinScore)
 	}
 
+	// Handle ties for winner selection
 	if len(tieIndices) > 1 {
 		switch mpu.config.TieBreaker {
 		case TieFirst:
@@ -182,7 +191,7 @@ func (mpu *ArithmeticMeanUnit) Aggregate(
 		}
 	}
 
-	return candidates[winnerIdx], maxScore, nil
+	return candidates[winnerIdx], mean, nil
 }
 
 // Validate checks if the unit is properly configured and ready for execution.

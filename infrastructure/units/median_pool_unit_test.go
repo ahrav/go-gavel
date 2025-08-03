@@ -171,7 +171,7 @@ func TestMedianPoolUnit_Aggregate(t *testing.T) {
 			},
 			scores:        []float64{0.6, 0.7, 0.75}, // median = 0.7 < 0.8
 			candidates:    []domain.Answer{{ID: "a1"}, {ID: "a2"}, {ID: "a3"}},
-			expectedError: "highest score below minimum threshold",
+			expectedError: "aggregate score below minimum threshold",
 		},
 		{
 			name: "handles empty scores",

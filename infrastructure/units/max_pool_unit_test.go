@@ -73,7 +73,7 @@ func TestMeanPoolUnit_Aggregate(t *testing.T) {
 			},
 			scores:        []float64{0.8, 0.7, 0.85}, // max = 0.85 < 0.9
 			candidates:    []domain.Answer{{ID: "a1"}, {ID: "a2"}, {ID: "a3"}},
-			expectedError: "highest score below minimum threshold",
+			expectedError: "aggregate score below minimum threshold",
 		},
 		{
 			name: "handles empty scores",

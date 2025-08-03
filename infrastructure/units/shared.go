@@ -34,7 +34,7 @@ var (
 	ErrTie = errors.New("multiple answers tied with highest score")
 
 	// ErrBelowMinScore is returned when the aggregate score is below the minimum threshold.
-	ErrBelowMinScore = errors.New("highest score below minimum threshold")
+	ErrBelowMinScore = errors.New("aggregate score below minimum threshold")
 
 	// ErrNoScores is returned when no scores are provided for aggregation.
 	ErrNoScores = errors.New("no scores provided for aggregation")

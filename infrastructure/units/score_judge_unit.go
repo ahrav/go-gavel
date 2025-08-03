@@ -182,7 +182,7 @@ func (s ScoreScale) String() string {
 // when scoring answers. This ensures reliable parsing and validation.
 type LLMJudgeResponse struct {
 	// Score is the numerical score for the answer within the configured range.
-	Score float64 `json:"score" validate:"required"`
+	Score float64 `json:"score"`
 
 	// Confidence represents how confident the LLM is in its scoring (0.0-1.0).
 	Confidence float64 `json:"confidence" validate:"required,min=0.0,max=1.0"`
