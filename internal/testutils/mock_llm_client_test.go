@@ -10,6 +10,8 @@ import (
 	"github.com/ahrav/go-gavel/internal/ports"
 )
 
+// TestMockLLMClient_Complete tests the Complete method of the mock LLM client.
+// It verifies that the client returns the expected response based on the prompt and options.
 func TestMockLLMClient_Complete(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -83,6 +85,8 @@ func TestMockLLMClient_Complete(t *testing.T) {
 	}
 }
 
+// TestMockLLMClient_EstimateTokens tests the token estimation logic of the mock LLM client.
+// It ensures that the token count is proportional to the text length.
 func TestMockLLMClient_EstimateTokens(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -102,12 +106,12 @@ func TestMockLLMClient_EstimateTokens(t *testing.T) {
 		{
 			name:           "medium text returns reasonable estimate",
 			text:           "This is a test sentence.",
-			expectedTokens: 6, // 25 characters / 4 = 6.25, rounded down to 6
+			expectedTokens: 6, // 25 characters / 4 = 6.25, rounded down to 6.
 		},
 		{
 			name:           "long text returns proportional estimate",
 			text:           "This is a much longer sentence that contains multiple words and should result in a higher token count estimate based on the character-to-token ratio.",
-			expectedTokens: 37, // 149 characters / 4 = 37.25, rounded down to 37
+			expectedTokens: 37, // 149 characters / 4 = 37.25, rounded down to 37.
 		},
 	}
 
@@ -123,11 +127,13 @@ func TestMockLLMClient_EstimateTokens(t *testing.T) {
 	}
 }
 
+// TestMockLLMClient_GetModel verifies that the GetModel method returns the correct model name.
 func TestMockLLMClient_GetModel(t *testing.T) {
 	client := NewMockLLMClient("custom-model-v2")
 	assert.Equal(t, "custom-model-v2", client.GetModel())
 }
 
+// TestMockLLMClient_SetModel verifies that the SetModel method updates the model name.
 func TestMockLLMClient_SetModel(t *testing.T) {
 	client := NewMockLLMClient("initial-model")
 	assert.Equal(t, "initial-model", client.GetModel())
@@ -136,10 +142,10 @@ func TestMockLLMClient_SetModel(t *testing.T) {
 	assert.Equal(t, "updated-model", client.GetModel())
 }
 
+// TestMockLLMClient_AddResponse tests the ability to add custom responses to the mock client.
 func TestMockLLMClient_AddResponse(t *testing.T) {
 	client := NewMockLLMClient("test-model")
 
-	// Add custom response.
 	customResponse := MockResponse{
 		Pattern:    "custom",
 		Response:   "This is a custom response for testing",
@@ -153,15 +159,15 @@ func TestMockLLMClient_AddResponse(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "This is a custom response for testing", result)
 
-	// Verify token usage.
 	tokens := client.GetTokenUsage("custom")
 	assert.Equal(t, 10, tokens)
 }
 
+// TestMockLLMClient_Reset tests the client's reset functionality.
+// It ensures that custom responses are cleared and default behavior is restored.
 func TestMockLLMClient_Reset(t *testing.T) {
 	client := NewMockLLMClient("test-model")
 
-	// Add custom response.
 	customResponse := MockResponse{
 		Pattern:    "custom",
 		Response:   "Custom response",
@@ -169,48 +175,47 @@ func TestMockLLMClient_Reset(t *testing.T) {
 	}
 	client.AddResponse(customResponse)
 
-	// Verify custom response works.
 	ctx := context.Background()
 	result, err := client.Complete(ctx, "custom prompt", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "Custom response", result)
 
-	// Reset and verify default behavior is restored.
 	client.Reset()
 	result, err = client.Complete(ctx, "custom prompt", nil)
 	require.NoError(t, err)
 	assert.NotEqual(t, "Custom response", result)
-	assert.Contains(t, result, "standard response") // Should match default pattern
+	assert.Contains(t, result, "standard response") // Should match the default pattern.
 }
 
+// TestMockLLMClient_GetTokenUsage verifies that token usage is tracked correctly.
 func TestMockLLMClient_GetTokenUsage(t *testing.T) {
 	client := NewMockLLMClient("test-model")
 
-	// Test default token usage.
 	generateTokens := client.GetTokenUsage("generate")
 	assert.Equal(t, 25, generateTokens)
 
 	scoreTokens := client.GetTokenUsage("score")
 	assert.Equal(t, 22, scoreTokens)
 
-	// Test unknown pattern returns default.
 	unknownTokens := client.GetTokenUsage("unknown")
 	defaultTokens := client.GetTokenUsage("")
 	assert.Equal(t, defaultTokens, unknownTokens)
 }
 
+// TestMockLLMClient_ContextCancellation ensures that the client respects context cancellation.
 func TestMockLLMClient_ContextCancellation(t *testing.T) {
 	client := NewMockLLMClient("test-model")
 
-	// Test with cancelled context.
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
+	cancel() // Cancel the context immediately.
 
 	_, err := client.Complete(ctx, "test prompt", nil)
 	require.Error(t, err)
 	assert.Equal(t, context.Canceled, err)
 }
 
+// TestMockLLMClient_VariationLogic tests the logic for adding variation to responses.
+// It verifies that response suffixes are added based on prompt length and temperature.
 func TestMockLLMClient_VariationLogic(t *testing.T) {
 	client := NewMockLLMClient("test-model")
 	ctx := context.Background()
@@ -233,18 +238,19 @@ func TestMockLLMClient_VariationLogic(t *testing.T) {
 		{
 			name:           "short prompt adds details suffix",
 			prompt:         "This is a shorter prompt that should get details.",
-			expectedSuffix: "", // 50 chars or less, no variation
+			expectedSuffix: "", // No variation for prompts of 50 characters or less.
 		},
 		{
 			name:           "very short prompt gets no suffix variation",
 			prompt:         "Short",
-			expectedSuffix: "", // No variation for very short prompts
+			expectedSuffix: "", // No variation for very short prompts.
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			options := map[string]any{"temperature": 0.8} // High temperature to trigger variation
+			// A high temperature is required to trigger the variation logic.
+			options := map[string]any{"temperature": 0.8}
 
 			result, err := client.Complete(ctx, tt.prompt, options)
 			require.NoError(t, err)
@@ -253,7 +259,7 @@ func TestMockLLMClient_VariationLogic(t *testing.T) {
 				assert.Contains(t, result, tt.expectedSuffix,
 					"Response should contain expected variation suffix")
 			} else {
-				// For very short prompts, should not contain any of the variation suffixes
+				// For very short prompts, no variation suffixes should be present.
 				assert.NotContains(t, result, "Additionally, this comprehensive")
 				assert.NotContains(t, result, "This response includes additional")
 				assert.NotContains(t, result, "Further details enhance")
@@ -262,24 +268,20 @@ func TestMockLLMClient_VariationLogic(t *testing.T) {
 	}
 }
 
+// TestMockLLMClient_InterfaceCompliance verifies that MockLLMClient implements the ports.LLMClient interface.
 func TestMockLLMClient_InterfaceCompliance(t *testing.T) {
-	// Verify that MockLLMClient implements the LLMClient interface.
 	var client ports.LLMClient = NewMockLLMClient("test-model")
 
-	// Test all interface methods are available.
 	ctx := context.Background()
 
-	// Test Complete method.
 	response, err := client.Complete(ctx, "test", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, response)
 
-	// Test EstimateTokens method.
 	tokens, err := client.EstimateTokens("test text")
 	require.NoError(t, err)
 	assert.Greater(t, tokens, 0)
 
-	// Test GetModel method.
 	model := client.GetModel()
 	assert.Equal(t, "test-model", model)
 }

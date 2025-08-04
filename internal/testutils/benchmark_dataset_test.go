@@ -13,6 +13,8 @@ import (
 	"github.com/ahrav/go-gavel/internal/domain"
 )
 
+// TestValidateBenchmarkDataset tests the validation logic for benchmark datasets.
+// It covers nil datasets, metadata validation, size constraints, and data integrity.
 func TestValidateBenchmarkDataset(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -137,6 +139,8 @@ func TestValidateBenchmarkDataset(t *testing.T) {
 	}
 }
 
+// TestComputeDatasetStatistics verifies the calculation of dataset statistics.
+// It checks the counts of questions, domains, difficulties, and answer distributions.
 func TestComputeDatasetStatistics(t *testing.T) {
 	dataset := &BenchmarkDataset{
 		Questions: []BenchmarkQuestion{
@@ -188,13 +192,14 @@ func TestComputeDatasetStatistics(t *testing.T) {
 	assert.Equal(t, 4, stats.MaxAnswers)
 }
 
+// TestLoadSaveBenchmarkDataset tests the serialization and deserialization of a benchmark dataset.
+// It ensures that a dataset can be saved to a file and loaded back without data loss.
 func TestLoadSaveBenchmarkDataset(t *testing.T) {
-	// Create a temporary directory
 	tmpDir := t.TempDir()
 	datasetPath := filepath.Join(tmpDir, "test_dataset.json")
 
-	// Create a small test dataset - we'll test validation separately
-	// For load/save testing, we'll use a simpler validation
+	// Create a small test dataset.
+	// Full validation is tested separately.
 	originalDataset := &BenchmarkDataset{
 		Metadata: DatasetMetadata{
 			Name:        "Test Dataset",
@@ -231,19 +236,16 @@ func TestLoadSaveBenchmarkDataset(t *testing.T) {
 		},
 	}
 
-	// Save the dataset
 	err := SaveBenchmarkDataset(originalDataset, datasetPath)
 	require.NoError(t, err)
 
-	// Verify file exists
 	_, err = os.Stat(datasetPath)
 	require.NoError(t, err)
 
-	// Load the dataset back without full validation (since we have < 500 questions)
+	// Load the dataset back without full validation, as it has fewer than the minimum required questions.
 	loadedDataset, err := LoadBenchmarkDatasetNoValidation(datasetPath)
 	require.NoError(t, err)
 
-	// Verify the loaded dataset matches the original
 	assert.Equal(t, originalDataset.Metadata, loadedDataset.Metadata)
 	assert.Equal(t, len(originalDataset.Questions), len(loadedDataset.Questions))
 
@@ -257,6 +259,8 @@ func TestLoadSaveBenchmarkDataset(t *testing.T) {
 	}
 }
 
+// TestLoadBenchmarkDataset_Errors tests error handling when loading a benchmark dataset.
+// It covers scenarios like non-existent files, invalid JSON, and failed validation.
 func TestLoadBenchmarkDataset_Errors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -312,8 +316,9 @@ func TestLoadBenchmarkDataset_Errors(t *testing.T) {
 	}
 }
 
-// Helper functions for creating test data
+// Helper functions for creating test data.
 
+// createValidQuestions generates a slice of valid benchmark questions.
 func createValidQuestions(count int) []BenchmarkQuestion {
 	questions := make([]BenchmarkQuestion, count)
 	for i := 0; i < count; i++ {
@@ -330,14 +335,17 @@ func createValidQuestions(count int) []BenchmarkQuestion {
 	return questions
 }
 
+// createQuestionsWithDuplicateID generates questions with a duplicate ID for testing validation.
 func createQuestionsWithDuplicateID(count int) []BenchmarkQuestion {
 	questions := createValidQuestions(count)
 	if count > 1 {
-		questions[1].ID = questions[0].ID // Create duplicate
+		// Create a duplicate ID to test validation.
+		questions[1].ID = questions[0].ID
 	}
 	return questions
 }
 
+// createQuestionsWithInvalidGroundTruth generates questions with an invalid ground truth ID.
 func createQuestionsWithInvalidGroundTruth(count int) []BenchmarkQuestion {
 	questions := createValidQuestions(count)
 	if count > 0 {
@@ -346,8 +354,10 @@ func createQuestionsWithInvalidGroundTruth(count int) []BenchmarkQuestion {
 	return questions
 }
 
-// Tests for the improved benchmark dataset generator
+// Tests for the improved benchmark dataset generator.
 
+// TestGenerateSampleBenchmarkDatasetWithSeed tests the generation of sample benchmark datasets.
+// It verifies dataset size, variety, and validity for different seeds and sizes.
 func TestGenerateSampleBenchmarkDatasetWithSeed(t *testing.T) {
 	tests := []struct {
 		name string
@@ -373,20 +383,16 @@ func TestGenerateSampleBenchmarkDatasetWithSeed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Generate dataset
 			dataset := GenerateSampleBenchmarkDataset(tt.size, tt.seed)
 
-			// Basic validation
 			require.NotNil(t, dataset)
 			assert.Equal(t, tt.size, len(dataset.Questions))
 			assert.Equal(t, tt.size, dataset.Metadata.Size)
 
-			// Validate the dataset using our validation function
 			if tt.size >= MinimumDatasetSize {
 				require.NoError(t, ValidateBenchmarkDataset(dataset))
 			}
 
-			// Check for variety in domains and difficulties
 			domains := make(map[string]int)
 			difficulties := make(map[string]int)
 
@@ -394,10 +400,8 @@ func TestGenerateSampleBenchmarkDatasetWithSeed(t *testing.T) {
 				domains[q.Domain]++
 				difficulties[q.Difficulty]++
 
-				// Verify each question has exactly 4 answers
 				assert.Equal(t, DefaultAnswerCount, len(q.Answers))
 
-				// Verify ground truth exists
 				found := false
 				for _, ans := range q.Answers {
 					if ans.ID == q.GroundTruthID {
@@ -408,14 +412,12 @@ func TestGenerateSampleBenchmarkDatasetWithSeed(t *testing.T) {
 				assert.True(t, found, "Question %s: ground truth ID %s not found", q.ID, q.GroundTruthID)
 			}
 
-			// Verify we have questions from all domains
 			if tt.size >= 30 {
 				for _, domain := range []string{DomainMath, DomainScience, DomainGeneral} {
 					assert.Greater(t, domains[domain], 0, "No questions found for domain %s", domain)
 				}
 			}
 
-			// Verify we have questions of all difficulties
 			if tt.size >= 30 {
 				for _, diff := range []string{DifficultyEasy, DifficultyMedium, DifficultyHard} {
 					assert.Greater(t, difficulties[diff], 0, "No questions found for difficulty %s", diff)
@@ -425,15 +427,14 @@ func TestGenerateSampleBenchmarkDatasetWithSeed(t *testing.T) {
 	}
 }
 
+// TestGenerateSampleBenchmarkDatasetDeterministic ensures that datasets generated with the same seed are identical.
 func TestGenerateSampleBenchmarkDatasetDeterministic(t *testing.T) {
 	seed := int64(42)
 	size := 100
 
-	// Generate two datasets with the same seed
 	dataset1 := GenerateSampleBenchmarkDataset(size, seed)
 	dataset2 := GenerateSampleBenchmarkDataset(size, seed)
 
-	// Verify they are identical
 	require.Equal(t, len(dataset1.Questions), len(dataset2.Questions))
 
 	for i := range dataset1.Questions {
@@ -446,7 +447,6 @@ func TestGenerateSampleBenchmarkDatasetDeterministic(t *testing.T) {
 		assert.Equal(t, q1.Difficulty, q2.Difficulty)
 		assert.Equal(t, q1.GroundTruthID, q2.GroundTruthID)
 
-		// Check answers are in the same order
 		require.Equal(t, len(q1.Answers), len(q2.Answers))
 
 		for j := range q1.Answers {
@@ -456,21 +456,20 @@ func TestGenerateSampleBenchmarkDatasetDeterministic(t *testing.T) {
 	}
 }
 
+// TestContentVariety checks for a diverse range of questions and answers in the generated dataset.
+// It ensures that the dataset is not repetitive and covers various topics.
 func TestContentVariety(t *testing.T) {
-	// Generate a larger dataset to test content variety
 	dataset := GenerateSampleBenchmarkDataset(500, 99999)
 
-	// Track unique questions
 	uniqueQuestions := make(map[string]bool)
 	for _, q := range dataset.Questions {
 		uniqueQuestions[q.Question] = true
 	}
 
-	// We should have a good variety of unique questions
+	// Ensure a reasonable variety of unique questions to avoid repetition.
 	uniqueRatio := float64(len(uniqueQuestions)) / float64(len(dataset.Questions))
 	assert.Greater(t, uniqueRatio, 0.2, "Low question variety: only %.2f%% unique questions", uniqueRatio*100)
 
-	// Check for math question variety
 	mathOperations := make(map[string]int)
 	for _, q := range dataset.Questions {
 		if q.Domain == DomainMath {
@@ -486,10 +485,12 @@ func TestContentVariety(t *testing.T) {
 		}
 	}
 
-	// Verify we have various math operations
+	// Ensure a variety of math operations are present in the dataset.
 	assert.GreaterOrEqual(t, len(mathOperations), 3, "Low math operation variety: only %d different operations found", len(mathOperations))
 }
 
+// TestImprovedLicenseValidation tests the license compatibility check.
+// It verifies that the license validation is case-insensitive and handles various formats.
 func TestImprovedLicenseValidation(t *testing.T) {
 	tests := []struct {
 		license string
@@ -515,6 +516,7 @@ func TestImprovedLicenseValidation(t *testing.T) {
 	}
 }
 
+// TestDuplicateAnswerContentValidation ensures that duplicate answer content within a single question is detected.
 func TestDuplicateAnswerContentValidation(t *testing.T) {
 	dataset := &BenchmarkDataset{
 		Metadata: DatasetMetadata{
@@ -527,10 +529,10 @@ func TestDuplicateAnswerContentValidation(t *testing.T) {
 		Questions: createValidQuestions(500),
 	}
 
-	// Add duplicate answer content to first question
+	// Add duplicate answer content to the first question to test validation.
 	dataset.Questions[0].Answers = []domain.Answer{
 		{ID: "a1", Content: "Same Answer"},
-		{ID: "a2", Content: "Same Answer"}, // Duplicate content
+		{ID: "a2", Content: "Same Answer"},
 		{ID: "a3", Content: "Different"},
 	}
 
@@ -539,6 +541,7 @@ func TestDuplicateAnswerContentValidation(t *testing.T) {
 	assert.Contains(t, err.Error(), "duplicate answer content")
 }
 
+// TestAnswerDistributionValidation verifies that questions have a valid number of answers.
 func TestAnswerDistributionValidation(t *testing.T) {
 	dataset := &BenchmarkDataset{
 		Metadata: DatasetMetadata{
@@ -551,17 +554,19 @@ func TestAnswerDistributionValidation(t *testing.T) {
 		Questions: createValidQuestions(500),
 	}
 
-	// Make one question have only one answer
+	// Make one question have only one answer to test validation.
 	dataset.Questions[0].Answers = []domain.Answer{
 		{ID: "a1", Content: "Only Answer"},
 	}
 
 	err := ValidateBenchmarkDataset(dataset)
 	require.Error(t, err)
-	// The error comes from individual question validation, not the distribution check
+	// The error originates from individual question validation, not the distribution check.
 	assert.Contains(t, err.Error(), "question must have at least 2 candidate answers")
 }
 
+// TestGenerateSafeFakeSymbols tests the generation of safe fake chemical symbols.
+// It ensures that the generated symbols are different from the real one.
 func TestGenerateSafeFakeSymbols(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -590,7 +595,6 @@ func TestGenerateSafeFakeSymbols(t *testing.T) {
 			fakes := GenerateSafeFakeSymbols(tt.symbol)
 			assert.Equal(t, tt.expected, len(fakes))
 
-			// Verify all fakes are different from the real symbol
 			for _, fake := range fakes {
 				assert.NotEqual(t, tt.symbol, fake)
 			}

@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestLLMError tests the functionality of the LLMError error type.
+// It covers error creation, message formatting, and retryable logic.
 func TestLLMError(t *testing.T) {
 	t.Run("basic error", func(t *testing.T) {
 		err := NewLLMError("gpt-4", "Complete", ErrTokenLimitExceeded)
@@ -53,7 +55,6 @@ func TestLLMError(t *testing.T) {
 			assert.True(t, err.IsRetryable(), "%v should be retryable", baseErr)
 		}
 
-		// Non-retryable errors
 		nonRetryableErrors := []error{
 			ErrTokenLimitExceeded,
 			ErrInvalidResponse,
@@ -67,6 +68,8 @@ func TestLLMError(t *testing.T) {
 	})
 }
 
+// TestCacheError tests the functionality of the CacheError error type.
+// It verifies that the error message is formatted correctly and contains the expected context.
 func TestCacheError(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -103,6 +106,8 @@ func TestCacheError(t *testing.T) {
 	}
 }
 
+// TestMetricsError tests the functionality of the MetricsError error type.
+// It ensures that the error message is formatted correctly and includes the necessary context.
 func TestMetricsError(t *testing.T) {
 	err := NewMetricsError("api_latency", "RecordHistogram", errors.New("connection refused"))
 
@@ -111,6 +116,8 @@ func TestMetricsError(t *testing.T) {
 	assert.Equal(t, "RecordHistogram", err.Operation)
 }
 
+// TestConfigError tests the functionality of the ConfigError error type.
+// It verifies that the error message is formatted correctly and contains the relevant configuration key.
 func TestConfigError(t *testing.T) {
 	err := NewConfigError("database.url", ErrConfigNotFound)
 
@@ -119,8 +126,9 @@ func TestConfigError(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrConfigNotFound))
 }
 
+// TestCommonInfrastructureErrors tests that the common infrastructure errors are defined.
+// It checks that each error has the expected error message.
 func TestCommonInfrastructureErrors(t *testing.T) {
-	// Test that common errors are defined and have expected messages
 	tests := []struct {
 		err     error
 		message string
@@ -142,10 +150,11 @@ func TestCommonInfrastructureErrors(t *testing.T) {
 	}
 }
 
+// TestErrorUnwrapping tests that all custom error types in the package support unwrapping.
+// It ensures that the underlying error can be extracted correctly using errors.Is and Unwrap.
 func TestErrorUnwrapping(t *testing.T) {
 	baseErr := errors.New("underlying error")
 
-	// Test all error types support unwrapping
 	errorList := []interface {
 		error
 		Unwrap() error

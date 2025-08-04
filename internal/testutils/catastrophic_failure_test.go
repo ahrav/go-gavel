@@ -12,7 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestCatastrophicTimeouts tests timeout behavior under various conditions.
+// TestCatastrophicTimeouts tests the behavior of the mock client under various timeout conditions.
+// It verifies that both client-side and context-based timeouts are handled correctly.
 func TestCatastrophicTimeouts(t *testing.T) {
 	dataset := GenerateSampleBenchmarkDataset(10, 42)
 
@@ -39,7 +40,7 @@ func TestCatastrophicTimeouts(t *testing.T) {
 		},
 		{
 			name:          "No timeout",
-			timeout:       0, // No timeout set
+			timeout:       0,
 			ctxTimeout:    1 * time.Second,
 			expectError:   false,
 			errorContains: "",
@@ -67,16 +68,14 @@ func TestCatastrophicTimeouts(t *testing.T) {
 				assert.Contains(t, err.Error(), tc.errorContains)
 				assert.Empty(t, response)
 
-				// Verify timeout was respected
 				if tc.timeout > 0 && tc.timeout < tc.ctxTimeout {
 					assert.GreaterOrEqual(t, elapsed, tc.timeout)
-					assert.Less(t, elapsed, tc.timeout+50*time.Millisecond) // Allow some slack
+					assert.Less(t, elapsed, tc.timeout+50*time.Millisecond) // Allow for minor scheduling delays.
 				}
 			} else {
 				require.NoError(t, err)
 				assert.NotEmpty(t, response)
 
-				// Verify response is valid JSON
 				var result map[string]any
 				err = json.Unmarshal([]byte(response), &result)
 				require.NoError(t, err)
@@ -85,7 +84,8 @@ func TestCatastrophicTimeouts(t *testing.T) {
 	}
 }
 
-// TestPartialAndMalformedResponses tests handling of corrupted responses.
+// TestPartialAndMalformedResponses tests the client's handling of corrupted or incomplete responses.
+// It ensures that the client can gracefully handle partial and malformed JSON.
 func TestPartialAndMalformedResponses(t *testing.T) {
 	dataset := GenerateSampleBenchmarkDataset(10, 123)
 	ctx := context.Background()
@@ -97,14 +97,12 @@ func TestPartialAndMalformedResponses(t *testing.T) {
 		prompt := "Rate this answer: Question: What is 2+2? Answer: 4"
 		response, err := client.Complete(ctx, prompt, nil)
 
-		// Should not error, but response will be incomplete
+		// The client should not error, but the response will be incomplete.
 		require.NoError(t, err)
 		assert.NotEmpty(t, response)
 
-		// Response should be truncated
 		assert.True(t, strings.HasSuffix(response, "...") || len(response) < 20)
 
-		// Should not be valid JSON
 		var result map[string]any
 		err = json.Unmarshal([]byte(response), &result)
 		assert.Error(t, err, "Expected invalid JSON due to truncation")
@@ -117,14 +115,12 @@ func TestPartialAndMalformedResponses(t *testing.T) {
 		prompt := "Rate this answer: Question: What is 2+2? Answer: 4"
 		response, err := client.Complete(ctx, prompt, nil)
 
-		// Should not error at Complete level
+		// The Complete method should not error, as the corruption is in the response body.
 		require.NoError(t, err)
 		assert.NotEmpty(t, response)
 
-		// Response should contain corrupted JSON
-		assert.Contains(t, response, `"scor`) // Corrupted "score" field
+		assert.Contains(t, response, `"scor`) // Corrupted "score" field.
 
-		// Should fail JSON parsing
 		var result map[string]any
 		err = json.Unmarshal([]byte(response), &result)
 		assert.Error(t, err, "Expected JSON parse error due to corruption")
@@ -203,7 +199,8 @@ func TestNetworkFailures(t *testing.T) {
 	}
 }
 
-// TestRateLimiting tests rate limiting behavior.
+// TestRateLimiting tests the client's rate-limiting simulation.
+// It ensures that requests are blocked after a specified limit is reached.
 func TestRateLimiting(t *testing.T) {
 	dataset := GenerateSampleBenchmarkDataset(20, 789)
 	ctx := context.Background()
@@ -228,7 +225,7 @@ func TestRateLimiting(t *testing.T) {
 		},
 		{
 			name:          "No rate limit",
-			limitAfter:    0, // 0 means no limit
+			limitAfter:    0,
 			totalRequests: 10,
 			expectedPass:  10,
 		},
@@ -334,7 +331,8 @@ func TestCombinedFailures(t *testing.T) {
 	})
 }
 
-// TestFailureRecovery tests that failures can be recovered from.
+// TestFailureRecovery tests the client's ability to recover from simulated failures.
+// It ensures that after a failure is triggered, the client can be reset to a normal operational state.
 func TestFailureRecovery(t *testing.T) {
 	dataset := GenerateSampleBenchmarkDataset(10, 555)
 	ctx := context.Background()
@@ -342,29 +340,23 @@ func TestFailureRecovery(t *testing.T) {
 	client := NewBenchmarkMockLLMClient("recovery-test", dataset, ConservativeJudge)
 	prompt := "Rate this answer: Question: What is 2+2? Answer: 4"
 
-	// First, verify normal operation
 	response, err := client.Complete(ctx, prompt, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, response)
 
-	// Enable failures
 	client.SimulateTimeout(10 * time.Millisecond)
-	client.SimulateNetworkFailure(1.0) // 100% failure
+	client.SimulateNetworkFailure(1.0)
 	client.SimulateMalformedJSON()
 
-	// Verify failures are active
 	_, err = client.Complete(ctx, prompt, nil)
 	assert.Error(t, err)
 
-	// Reset failures
 	client.ResetFailureSimulation()
 
-	// Verify normal operation is restored
 	response, err = client.Complete(ctx, prompt, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, response)
 
-	// Verify valid JSON
 	var result map[string]any
 	err = json.Unmarshal([]byte(response), &result)
 	require.NoError(t, err)
@@ -372,19 +364,20 @@ func TestFailureRecovery(t *testing.T) {
 	assert.Contains(t, result, "confidence")
 }
 
-// TestAdversarialInputsWithFailures tests adversarial inputs combined with failures.
+// TestAdversarialInputsWithFailures tests how the client handles adversarial inputs when failures are also active.
+// It ensures that the client remains stable and handles both conditions gracefully.
 func TestAdversarialInputsWithFailures(t *testing.T) {
 	adversarialDataset := GenerateAdversarialDataset()
 	ctx := context.Background()
 
 	t.Run("Adversarial with Network Failures", func(t *testing.T) {
 		client := NewBenchmarkMockLLMClient("adversarial-failure", adversarialDataset, BiasedJudge)
-		client.SimulateNetworkFailure(0.2) // 20% failure rate
+		client.SimulateNetworkFailure(0.2)
 
 		successCount := 0
 		failureCount := 0
 
-		for _, question := range AdversarialQuestions[:5] { // Test first 5 adversarial questions
+		for _, question := range AdversarialQuestions[:5] {
 			for _, answer := range question.Answers {
 				prompt := fmt.Sprintf(
 					"Rate this answer: Question: %s Answer: %s",
@@ -398,7 +391,7 @@ func TestAdversarialInputsWithFailures(t *testing.T) {
 					assert.Contains(t, err.Error(), "network")
 				} else {
 					successCount++
-					// Even with adversarial input, valid responses should be returned
+					// Even with adversarial input, the client should return a valid response.
 					assert.NotEmpty(t, response)
 				}
 			}
@@ -413,10 +406,9 @@ func TestAdversarialInputsWithFailures(t *testing.T) {
 		client := NewBenchmarkMockLLMClient("long-input-timeout", adversarialDataset, AnalyticalJudge)
 		client.SimulateTimeout(100 * time.Millisecond)
 
-		// Find the extremely long input test case
 		var longQuestion BenchmarkQuestion
 		for _, q := range AdversarialQuestions {
-			if q.ID == "adv3" { // The extremely long input test
+			if q.ID == "adv3" {
 				longQuestion = q
 				break
 			}
@@ -424,8 +416,8 @@ func TestAdversarialInputsWithFailures(t *testing.T) {
 
 		prompt := fmt.Sprintf(
 			"Rate this answer: Question: %s Answer: %s",
-			longQuestion.Question,           // This is 10,000 'A's
-			longQuestion.Answers[1].Content, // This is 5,000 'B's
+			longQuestion.Question,
+			longQuestion.Answers[1].Content,
 		)
 
 		start := time.Now()

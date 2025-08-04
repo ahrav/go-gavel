@@ -12,12 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBenchmarkMockLLMClientThreadSafety verifies that the client is thread-safe.
+// TestBenchmarkMockLLMClientThreadSafety verifies that the mock LLM client is thread-safe.
+// It launches multiple goroutines to make concurrent requests to the client and checks for errors.
 func TestBenchmarkMockLLMClientThreadSafety(t *testing.T) {
-	// Create a test dataset
 	dataset := GenerateSampleBenchmarkDataset(100, 42)
 
-	// Create clients with different personalities
 	clients := map[string]*BenchmarkMockLLMClient{
 		"conservative":  NewBenchmarkMockLLMClient("test-conservative", dataset, ConservativeJudge),
 		"comprehensive": NewBenchmarkMockLLMClient("test-comprehensive", dataset, ComprehensiveJudge),
@@ -27,7 +26,6 @@ func TestBenchmarkMockLLMClientThreadSafety(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test concurrent access to each client
 	for name, client := range clients {
 		t.Run(name, func(t *testing.T) {
 			const numGoroutines = 50
@@ -36,39 +34,34 @@ func TestBenchmarkMockLLMClientThreadSafety(t *testing.T) {
 			var wg sync.WaitGroup
 			errors := make(chan error, numGoroutines*requestsPerGoroutine)
 
-			// Launch concurrent goroutines
 			for i := range numGoroutines {
 				wg.Add(1)
 				go func(goroutineID int) {
 					defer wg.Done()
 
 					for j := range requestsPerGoroutine {
-						// Use different questions to ensure variety
+						// Use a variety of questions to avoid cache hits.
 						questionIdx := (goroutineID*requestsPerGoroutine + j) % len(dataset.Questions)
 						question := dataset.Questions[questionIdx]
 
-						// Create a scoring prompt
 						prompt := fmt.Sprintf(
 							"Rate this answer to the question on a scale from 0.0 to 1.0:\nQuestion: %s\nAnswer: %s\n",
 							question.Question,
 							question.Answers[j%len(question.Answers)].Content,
 						)
 
-						// Execute the request
 						response, err := client.Complete(ctx, prompt, nil)
 						if err != nil {
 							errors <- fmt.Errorf("goroutine %d request %d: %w", goroutineID, j, err)
 							continue
 						}
 
-						// Validate the response
 						var result map[string]any
 						if err := json.Unmarshal([]byte(response), &result); err != nil {
 							errors <- fmt.Errorf("goroutine %d request %d: invalid JSON: %w", goroutineID, j, err)
 							continue
 						}
 
-						// Check required fields
 						if _, ok := result["score"]; !ok {
 							errors <- fmt.Errorf("goroutine %d request %d: missing score field", goroutineID, j)
 						}
@@ -79,11 +72,9 @@ func TestBenchmarkMockLLMClientThreadSafety(t *testing.T) {
 				}(i)
 			}
 
-			// Wait for all goroutines to complete
 			wg.Wait()
 			close(errors)
 
-			// Check for errors
 			var errorCount int
 			for err := range errors {
 				t.Errorf("Concurrent access error: %v", err)
@@ -98,7 +89,8 @@ func TestBenchmarkMockLLMClientThreadSafety(t *testing.T) {
 	}
 }
 
-// TestBenchmarkMockLLMClientRaceDetection uses Go's race detector to find race conditions.
+// TestBenchmarkMockLLMClientRaceDetection uses Go's race detector to identify potential race conditions.
+// It runs various client operations concurrently to stress test thread safety.
 func TestBenchmarkMockLLMClientRaceDetection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping race detection test in short mode")
@@ -109,33 +101,26 @@ func TestBenchmarkMockLLMClientRaceDetection(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Perform operations that might cause races
 	var wg sync.WaitGroup
 
-	// Concurrent reads and writes to various fields
 	operations := []func(){
-		// Complete requests
 		func() {
 			prompt := "Rate this answer: Question: Test? Answer: Test answer"
 			_, _ = client.Complete(ctx, prompt, nil)
 		},
-		// Modify configuration
 		func() {
 			config := DefaultJudgeConfig()
 			config.NoiseFactor = 0.15
 			client.SetConfig(config)
 		},
-		// Set ensemble config
 		func() {
 			ensembleConfig := DefaultEnsembleConfig()
 			client.SetEnsembleConfig(&ensembleConfig)
 		},
-		// Simulate failures
 		func() {
 			client.SimulateTimeout(100 * time.Millisecond)
 			client.ResetFailureSimulation()
 		},
-		// Shared error state
 		func() {
 			sharedState := make(map[string]float64)
 			sharedState["q1"] = 0.1
@@ -143,7 +128,6 @@ func TestBenchmarkMockLLMClientRaceDetection(t *testing.T) {
 		},
 	}
 
-	// Run operations concurrently
 	const iterations = 100
 	for _, op := range operations {
 		wg.Add(1)
@@ -157,21 +141,20 @@ func TestBenchmarkMockLLMClientRaceDetection(t *testing.T) {
 
 	wg.Wait()
 
-	// If we get here without race detector complaints, the test passes
+	// If the race detector does not report any issues, the test passes.
 	t.Log("No race conditions detected")
 }
 
-// TestCorrelatedErrorsConcurrency tests that correlated errors work correctly with concurrent access.
+// TestCorrelatedErrorsConcurrency verifies that correlated errors behave as expected under concurrent access.
+// It ensures that judges in an ensemble produce similar errors when configured with a high correlation factor.
 func TestCorrelatedErrorsConcurrency(t *testing.T) {
 	dataset := GenerateSampleBenchmarkDataset(100, 99999)
 
-	// Create ensemble config with correlation
 	ensembleConfig := EnsembleConfig{
 		ErrorCorrelation: 0.7,
 		SharedErrorSeed:  42,
 	}
 
-	// Create correlated ensemble
 	mocks := CreateCorrelatedBenchmarkEnsembleMocks(dataset, ensembleConfig)
 
 	ctx := context.Background()
@@ -179,7 +162,6 @@ func TestCorrelatedErrorsConcurrency(t *testing.T) {
 	results := make(map[string][]float64)
 	var mu sync.Mutex
 
-	// Each judge evaluates the same questions concurrently
 	for judgeName, judge := range mocks {
 		wg.Add(1)
 		go func(name string, client *BenchmarkMockLLMClient) {
@@ -187,7 +169,6 @@ func TestCorrelatedErrorsConcurrency(t *testing.T) {
 
 			scores := make([]float64, 0, 10)
 
-			// Evaluate first 10 questions
 			for i := 0; i < 10 && i < len(dataset.Questions); i++ {
 				question := dataset.Questions[i]
 				prompt := fmt.Sprintf(
@@ -215,8 +196,7 @@ func TestCorrelatedErrorsConcurrency(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify that scores show correlation
-	// With 0.7 correlation, judges should often make similar errors
+	// With a high error correlation, judges should produce similar error patterns.
 	correlatedCount := 0
 	totalComparisons := 0
 
@@ -228,7 +208,7 @@ func TestCorrelatedErrorsConcurrency(t *testing.T) {
 				score2 := results[judges[k]][i]
 
 				diff := abs(score1 - score2)
-				if diff < 0.2 { // Similar scores
+				if diff < 0.2 {
 					correlatedCount++
 				}
 				totalComparisons++
@@ -239,11 +219,12 @@ func TestCorrelatedErrorsConcurrency(t *testing.T) {
 	correlationRate := float64(correlatedCount) / float64(totalComparisons)
 	t.Logf("Correlation rate: %.2f (expected around %.2f)", correlationRate, ensembleConfig.ErrorCorrelation)
 
-	// With 70% correlation, we expect at least 50% of comparisons to be similar
+	// A 70% correlation should result in at least 50% of comparisons being similar.
 	assert.Greater(t, correlationRate, 0.5, "Expected judges to show correlated errors")
 }
 
-// TestCatastrophicFailuresConcurrency tests failure scenarios under concurrent load.
+// TestCatastrophicFailuresConcurrency tests how the mock client handles catastrophic failures under concurrent load.
+// It covers timeouts, network failures, and rate limiting.
 func TestCatastrophicFailuresConcurrency(t *testing.T) {
 	dataset := GenerateSampleBenchmarkDataset(50, 11111)
 
@@ -312,18 +293,18 @@ func TestCatastrophicFailuresConcurrency(t *testing.T) {
 
 			wg.Wait()
 
-			// For network failures and rate limiting, we expect some errors
+			// Network failures and rate limiting should produce some errors, but not all.
 			if tc.name != "Timeout" {
 				assert.Greater(t, errorCount, 0, "Expected some failures for %s", tc.name)
 			} else {
-				// For timeout, all requests should fail
+				// A timeout should cause all requests to fail.
 				assert.Equal(t, numGoroutines*requestsPerGoroutine, errorCount)
 			}
 		})
 	}
 }
 
-// Benchmark for concurrent performance
+// BenchmarkConcurrentComplete benchmarks the performance of the mock client under concurrent load.
 func BenchmarkConcurrentComplete(b *testing.B) {
 	dataset := GenerateSampleBenchmarkDataset(100, 54321)
 	client := NewBenchmarkMockLLMClient("benchmark", dataset, ComprehensiveJudge)

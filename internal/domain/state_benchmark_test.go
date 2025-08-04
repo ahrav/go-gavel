@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// BenchmarkState_Get benchmarks retrieving values from State
+// BenchmarkState_Get benchmarks the performance of retrieving values from a State instance.
+// It covers various data types, including strings, slices, integers, floats, booleans, and maps.
 func BenchmarkState_Get(b *testing.B) {
-	// Define custom keys for benchmarking
 	var (
 		countKey   = Key[int]{"count"}
 		scoreKey   = Key[float64]{"score"}
@@ -16,7 +16,6 @@ func BenchmarkState_Get(b *testing.B) {
 		dataKey    = Key[map[string]int]{"data"}
 	)
 
-	// Create a state with various types of data
 	answers := []Answer{{ID: "1", Content: "A"}, {ID: "2", Content: "B"}, {ID: "3", Content: "C"}, {ID: "4", Content: "D"}, {ID: "5", Content: "E"}}
 	state := With(
 		With(
@@ -83,7 +82,8 @@ func BenchmarkState_Get(b *testing.B) {
 	})
 }
 
-// BenchmarkState_With benchmarks adding values to State
+// BenchmarkState_With benchmarks the performance of adding values to a State instance.
+// It tests various data types and sizes to measure the impact of deep copying.
 func BenchmarkState_With(b *testing.B) {
 	baseState := NewState()
 
@@ -112,7 +112,6 @@ func BenchmarkState_With(b *testing.B) {
 	})
 
 	b.Run("With_LargeSlice", func(b *testing.B) {
-		// Create a larger slice to test deep copy performance
 		largeKey := Key[[]string]{"large"}
 		largeSlice := make([]string, 1000)
 		for i := range largeSlice {
@@ -125,7 +124,6 @@ func BenchmarkState_With(b *testing.B) {
 	})
 
 	b.Run("With_LargeMap", func(b *testing.B) {
-		// Create a larger map to test deep copy performance
 		largeMapKey := Key[map[string]int]{"largemap"}
 		largeMap := make(map[string]int, 1000)
 		for i := 0; i < 1000; i++ {
@@ -138,7 +136,7 @@ func BenchmarkState_With(b *testing.B) {
 	})
 }
 
-// BenchmarkState_WithMultiple benchmarks batch updates
+// BenchmarkState_WithMultiple benchmarks the performance of batch updates to a State instance.
 func BenchmarkState_WithMultiple(b *testing.B) {
 	baseState := NewState()
 
@@ -156,7 +154,6 @@ func BenchmarkState_WithMultiple(b *testing.B) {
 	})
 
 	b.Run("WithMultiple_Large", func(b *testing.B) {
-		// Create a large update map
 		updates := make(map[string]any)
 		for i := 0; i < 50; i++ {
 			updates[fmt.Sprintf("key_%d", i)] = i
@@ -168,7 +165,8 @@ func BenchmarkState_WithMultiple(b *testing.B) {
 	})
 }
 
-// BenchmarkState_DeepCopy benchmarks the deep copy functionality
+// BenchmarkState_DeepCopy benchmarks the performance of the deep copy functionality.
+// It covers various data types and structures to ensure efficient and correct copying.
 func BenchmarkState_DeepCopy(b *testing.B) {
 	b.Run("DeepCopy_String", func(b *testing.B) {
 		value := "test string"
@@ -257,7 +255,7 @@ func BenchmarkState_DeepCopy(b *testing.B) {
 	})
 }
 
-// BenchmarkState_Keys benchmarks the Keys operation
+// BenchmarkState_Keys benchmarks the performance of retrieving all keys from a State instance.
 func BenchmarkState_Keys(b *testing.B) {
 	b.Run("Keys_Small", func(b *testing.B) {
 		answers := []Answer{{ID: "1", Content: "A"}, {ID: "2", Content: "B"}}
@@ -287,7 +285,8 @@ func BenchmarkState_Keys(b *testing.B) {
 	})
 }
 
-// BenchmarkState_ConcurrentRead benchmarks concurrent read operations
+// BenchmarkState_ConcurrentRead benchmarks the performance of concurrent read operations on a State instance.
+// It uses RunParallel to simulate multiple goroutines reading from the same state.
 func BenchmarkState_ConcurrentRead(b *testing.B) {
 	answers := []Answer{{ID: "1", Content: "A"}, {ID: "2", Content: "B"}, {ID: "3", Content: "C"}, {ID: "4", Content: "D"}, {ID: "5", Content: "E"}}
 	dataKey := Key[map[string]int]{"data"}
@@ -302,7 +301,6 @@ func BenchmarkState_ConcurrentRead(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			// Mix of different read operations
 			_, _ = Get(state, KeyQuestion)
 			_, _ = Get(state, KeyAnswers)
 			_, _ = Get(state, dataKey)
@@ -310,14 +308,14 @@ func BenchmarkState_ConcurrentRead(b *testing.B) {
 	})
 }
 
-// BenchmarkState_ConcurrentWrite benchmarks concurrent write operations
+// BenchmarkState_ConcurrentWrite benchmarks the performance of concurrent write operations on a State instance.
+// Due to the immutable nature of State, each write operation creates a new instance, ensuring thread safety.
 func BenchmarkState_ConcurrentWrite(b *testing.B) {
 	baseState := NewState()
 
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
-			// Each goroutine creates its own state
 			key := Key[int]{fmt.Sprintf("key_%d", i)}
 			_ = With(baseState, key, i)
 			i++
@@ -325,10 +323,10 @@ func BenchmarkState_ConcurrentWrite(b *testing.B) {
 	})
 }
 
-// BenchmarkState_GenericVsSpecific compares the performance of generic Get vs old specific getters
-// This benchmark demonstrates that the generic approach has similar performance characteristics
+// BenchmarkState_GenericVsSpecific compares the performance of the generic Get method
+// against older, type-specific getter methods. This benchmark demonstrates that the generic
+// approach maintains comparable performance characteristics.
 func BenchmarkState_GenericVsSpecific(b *testing.B) {
-	// Create state with different typed values
 	verdict := &Verdict{ID: "v1", AggregateScore: 0.95}
 	answers := []Answer{{ID: "1", Content: "A"}, {ID: "2", Content: "B"}}
 	judgeSummaries := []JudgeSummary{{Score: 0.8, Reasoning: "Good", Confidence: 0.9}}
@@ -345,7 +343,6 @@ func BenchmarkState_GenericVsSpecific(b *testing.B) {
 			KeyBudgetTokensUsed, int64(1000)),
 		KeyTraceLevel, "debug")
 
-	// Benchmark the generic Get method
 	b.Run("Generic_Get_String", func(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {
@@ -353,7 +350,7 @@ func BenchmarkState_GenericVsSpecific(b *testing.B) {
 			if !ok {
 				b.Fatal("key not found")
 			}
-			_ = v // Use to prevent optimization
+			_ = v
 		}
 	})
 
@@ -391,8 +388,9 @@ func BenchmarkState_GenericVsSpecific(b *testing.B) {
 	})
 }
 
-// BenchmarkState_TypeSafety demonstrates that the generic approach provides compile-time type safety
-// without runtime type assertions in user code
+// BenchmarkState_TypeSafety demonstrates the compile-time type safety of the generic State implementation.
+// It shows that retrieving a value with a generic Key results in a correctly typed variable without
+// requiring a runtime type assertion.
 func BenchmarkState_TypeSafety(b *testing.B) {
 	answers := []Answer{{ID: "1", Content: "A"}, {ID: "2", Content: "B"}}
 	state := With(NewState(), KeyAnswers, answers)
@@ -400,12 +398,11 @@ func BenchmarkState_TypeSafety(b *testing.B) {
 	b.Run("TypeSafe_Access", func(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {
-			// With generics, we get the correct type directly
 			answers, ok := Get(state, KeyAnswers)
 			if !ok {
 				b.Fatal("key not found")
 			}
-			// No type assertion needed - answers is already []Answer
+
 			if len(answers) != 2 {
 				b.Fatal("unexpected length")
 			}
