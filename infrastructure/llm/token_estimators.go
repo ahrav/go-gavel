@@ -40,6 +40,27 @@ import (
 	"strings"
 )
 
+// Token estimation constants
+const (
+	// DefaultMaxTokens is the default maximum tokens for LLM requests
+	DefaultMaxTokens = 1024
+
+	// TokenEstimationFactor represents approximate characters per token
+	TokenEstimationFactor = 4
+)
+
+// EstimateTokens provides a simple token estimation for text.
+// This uses a character-based heuristic approximating modern tokenization.
+// For more accurate results, use provider-specific tokenization libraries.
+func EstimateTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	// Rough estimation: 1 token ≈ 4 characters for English text
+	// This is a simplified version that's more efficient than the previous implementation
+	return (len(text) + TokenEstimationFactor - 1) / TokenEstimationFactor
+}
+
 // WordBasedTokenEstimator estimates tokens based on word count.
 // This estimator provides fast, simple estimation using configurable
 // tokens-per-word ratios. Best for general-purpose estimation where

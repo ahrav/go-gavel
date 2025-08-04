@@ -13,6 +13,9 @@ import (
 	"github.com/ahrav/go-gavel/internal/testutils"
 )
 
+// TestAnswererUnit_Execute tests the full execution flow of the AnswererUnit.
+// It covers successful answer generation, handling of missing or empty inputs,
+// and ensures that the resulting state is correctly populated with answers.
 func TestAnswererUnit_Execute(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 
@@ -105,6 +108,9 @@ func TestAnswererUnit_Execute(t *testing.T) {
 	}
 }
 
+// TestAnswererUnit_Validate tests the configuration validation for the AnswererUnit.
+// It verifies that both valid and invalid configurations are correctly identified,
+// checking constraints on the number of answers, prompt length, temperature, and token limits.
 func TestAnswererUnit_Validate(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 
@@ -194,6 +200,8 @@ func TestAnswererUnit_Validate(t *testing.T) {
 	}
 }
 
+// TestAnswererUnit_Name tests that the Name method returns the identifier
+// assigned to the AnswererUnit at creation.
 func TestAnswererUnit_Name(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 	config := AnswererConfig{
@@ -211,6 +219,9 @@ func TestAnswererUnit_Name(t *testing.T) {
 	assert.Equal(t, "custom_answerer", unit.Name())
 }
 
+// TestNewAnswererUnit tests the constructor for the AnswererUnit.
+// It ensures that the unit is created successfully with valid parameters
+// and fails appropriately when provided with invalid inputs like an empty name or a nil LLM client.
 func TestNewAnswererUnit(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 
@@ -260,6 +271,9 @@ func TestNewAnswererUnit(t *testing.T) {
 	})
 }
 
+// TestAnswererUnit_UnmarshalParameters tests the UnmarshalParameters method.
+// It verifies that a new AnswererUnit can be created with updated parameters from a YAML node,
+// ensuring the original unit remains unchanged and that invalid parameters are correctly handled.
 func TestAnswererUnit_UnmarshalParameters(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 	config := AnswererConfig{
@@ -366,6 +380,9 @@ max_concurrency: 7
 	})
 }
 
+// TestCreateAnswererUnit tests the factory function for creating an AnswererUnit.
+// It ensures that the unit can be created from a map of parameters,
+// handles type conversions correctly, and applies default values for optional fields.
 func TestCreateAnswererUnit(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 

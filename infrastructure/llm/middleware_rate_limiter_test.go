@@ -13,17 +13,16 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// TestRateLimitMiddleware_AllowsRequestsWithinLimit tests that the rate limit middleware
+// allows requests to pass through when they are within the defined rate limit.
 func TestRateLimitMiddleware_AllowsRequestsWithinLimit(t *testing.T) {
-	// Given a rate limiter that allows 10 requests per second
 	mock := NewMockCoreLLM()
 	middleware := RateLimitMiddleware(rate.Limit(10), 1)
 	wrapped := middleware(mock)
 
-	// When making a single request
 	ctx := context.Background()
 	response, tokensIn, tokensOut, err := wrapped.DoRequest(ctx, "test prompt", nil)
 
-	// Then it should succeed immediately
 	require.NoError(t, err, "request should succeed within rate limit")
 	assert.Equal(t, "test response", response, "response should match")
 	assert.Equal(t, 10, tokensIn, "input tokens should match")
@@ -31,23 +30,21 @@ func TestRateLimitMiddleware_AllowsRequestsWithinLimit(t *testing.T) {
 	assert.Equal(t, 1, mock.GetCallCount(), "should call underlying implementation once")
 }
 
+// TestRateLimitMiddleware_DelaysRequestsExceedingRate tests that the rate limit middleware
+// delays requests that exceed the defined rate limit.
 func TestRateLimitMiddleware_DelaysRequestsExceedingRate(t *testing.T) {
-	// Given a rate limiter that allows 2 requests per second with burst of 1
 	mock := NewMockCoreLLM()
 	middleware := RateLimitMiddleware(rate.Limit(2), 1)
 	wrapped := middleware(mock)
 
-	// When making multiple requests quickly
 	ctx := context.Background()
 
-	// First request should succeed immediately
 	start := time.Now()
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt 1", nil)
 	firstDuration := time.Since(start)
 	require.NoError(t, err, "first request should succeed immediately")
 	assert.Less(t, firstDuration, 50*time.Millisecond, "first request should be immediate")
 
-	// Second request should be delayed due to rate limiting
 	start = time.Now()
 	_, _, _, err = wrapped.DoRequest(ctx, "test prompt 2", nil)
 	secondDuration := time.Since(start)
@@ -58,14 +55,15 @@ func TestRateLimitMiddleware_DelaysRequestsExceedingRate(t *testing.T) {
 	assert.Equal(t, 2, mock.GetCallCount(), "should call underlying implementation twice")
 }
 
+// TestRateLimitMiddleware_RespectsBurstLimit tests that the rate limit middleware
+// correctly handles burst capacity, allowing a certain number of requests to
+// exceed the rate limit before enforcing delays.
 func TestRateLimitMiddleware_RespectsBurstLimit(t *testing.T) {
-	// Given a rate limiter with burst capacity
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 10 * time.Millisecond
-	middleware := RateLimitMiddleware(rate.Limit(1), 3) // 1 per second, burst of 3
+	middleware := RateLimitMiddleware(rate.Limit(1), 3)
 	wrapped := middleware(mock)
 
-	// When making burst requests
 	ctx := context.Background()
 	var durations []time.Duration
 
@@ -77,13 +75,11 @@ func TestRateLimitMiddleware_RespectsBurstLimit(t *testing.T) {
 		require.NoError(t, err, "burst request %d should succeed", i+1)
 	}
 
-	// Then first 3 requests should succeed quickly (within burst)
 	for i, duration := range durations {
 		assert.Less(t, duration, 100*time.Millisecond,
 			"burst request %d should succeed quickly: %v", i+1, duration)
 	}
 
-	// Fourth request should be delayed
 	start := time.Now()
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 	fourthDuration := time.Since(start)
@@ -93,39 +89,38 @@ func TestRateLimitMiddleware_RespectsBurstLimit(t *testing.T) {
 	assert.Equal(t, 4, mock.GetCallCount(), "should call underlying implementation 4 times")
 }
 
+// TestRateLimitMiddleware_RespectsContextCancellation tests that the rate limit
+// middleware respects context cancellation and stops waiting for the rate limiter
+// if the context is canceled.
 func TestRateLimitMiddleware_RespectsContextCancellation(t *testing.T) {
-	// Given a very restrictive rate limiter
 	mock := NewMockCoreLLM()
-	middleware := RateLimitMiddleware(rate.Limit(0.1), 1) // Very slow: 1 per 10 seconds
+	middleware := RateLimitMiddleware(rate.Limit(0.1), 1)
 	wrapped := middleware(mock)
 
-	// When making a request with short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	// First request consumes the token
 	_, _, _, err := wrapped.DoRequest(context.Background(), "first", nil)
 	require.NoError(t, err, "first request should succeed")
 
-	// Second request should be cancelled due to context timeout
 	_, _, _, err = wrapped.DoRequest(ctx, "second", nil)
 
 	require.Error(t, err, "request should be cancelled")
 	assert.True(t, errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "rate limit"),
 		"error should be context or rate limit related: %v", err)
 
-	// Mock should only be called once (for the successful request)
 	assert.Equal(t, 1, mock.GetCallCount(), "should not call underlying implementation on cancelled request")
 }
 
+// TestRateLimitMiddleware_HandlesConcurrentRequests tests that the rate limit
+// middleware correctly handles concurrent requests, ensuring that the overall
+// rate limit is respected.
 func TestRateLimitMiddleware_HandlesConcurrentRequests(t *testing.T) {
-	// Given a rate limiter with limited throughput
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 10 * time.Millisecond
-	middleware := RateLimitMiddleware(rate.Limit(5), 2) // 5 per second, burst of 2
+	middleware := RateLimitMiddleware(rate.Limit(5), 2)
 	wrapped := middleware(mock)
 
-	// When making concurrent requests
 	const numGoroutines = 10
 	var wg sync.WaitGroup
 	errors := make(chan error, numGoroutines)
@@ -148,7 +143,6 @@ func TestRateLimitMiddleware_HandlesConcurrentRequests(t *testing.T) {
 	close(errors)
 	close(durations)
 
-	// Then all requests should eventually succeed
 	var successCount int
 	for err := range errors {
 		if err == nil {
@@ -159,7 +153,6 @@ func TestRateLimitMiddleware_HandlesConcurrentRequests(t *testing.T) {
 	}
 	assert.Equal(t, numGoroutines, successCount, "all requests should succeed")
 
-	// Some requests should be delayed due to rate limiting
 	var fastRequests, slowRequests int
 	for duration := range durations {
 		if duration < 100*time.Millisecond {
@@ -173,13 +166,13 @@ func TestRateLimitMiddleware_HandlesConcurrentRequests(t *testing.T) {
 	assert.Equal(t, numGoroutines, mock.GetCallCount(), "should call underlying implementation for all requests")
 }
 
+// TestRateLimitMiddleware_PassesThroughModelMethods tests that the rate limit
+// middleware correctly passes through calls to the underlying CoreLLM's methods.
 func TestRateLimitMiddleware_PassesThroughModelMethods(t *testing.T) {
-	// Given a wrapped mock
 	mock := NewMockCoreLLM()
 	middleware := RateLimitMiddleware(rate.Limit(10), 1)
 	wrapped := middleware(mock)
 
-	// When calling model methods
 	assert.Equal(t, "test-model", wrapped.GetModel(), "should pass through GetModel")
 
 	wrapped.SetModel("new-model")
@@ -187,18 +180,17 @@ func TestRateLimitMiddleware_PassesThroughModelMethods(t *testing.T) {
 	assert.Equal(t, "new-model", mock.GetModel(), "should update underlying mock")
 }
 
+// TestRateLimitMiddleware_PreservesContextAndOptions tests that the rate limit
+// middleware preserves the context and options passed to the DoRequest method.
 func TestRateLimitMiddleware_PreservesContextAndOptions(t *testing.T) {
-	// Given a rate-limited mock
 	mock := NewMockCoreLLM()
 	middleware := RateLimitMiddleware(rate.Limit(10), 1)
 	wrapped := middleware(mock)
 
-	// When making a request with context and options
 	ctx := context.WithValue(context.Background(), testContextKey, "test-value")
 	opts := map[string]any{"temperature": 0.7, "max_tokens": 100}
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", opts)
 
-	// Then context and options should be preserved
 	require.NoError(t, err, "request should succeed")
 	assert.Equal(t, "test prompt", mock.LastPrompt, "prompt should be preserved")
 	assert.Equal(t, opts, mock.LastOpts, "options should be preserved")
@@ -206,49 +198,47 @@ func TestRateLimitMiddleware_PreservesContextAndOptions(t *testing.T) {
 		"context value should be preserved")
 }
 
+// TestRateLimitMiddleware_HandlesUnderlyingErrors tests that the rate limit
+// middleware correctly propagates errors from the underlying CoreLLM.
 func TestRateLimitMiddleware_HandlesUnderlyingErrors(t *testing.T) {
-	// Given a mock that fails
 	mock := NewMockCoreLLM()
 	mock.Error = errors.New("underlying error")
 	middleware := RateLimitMiddleware(rate.Limit(10), 1)
 	wrapped := middleware(mock)
 
-	// When making a request
 	ctx := context.Background()
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 
-	// Then it should return the underlying error
 	require.Error(t, err, "request should fail")
 	assert.Equal(t, "underlying error", err.Error(), "should return underlying error")
 	assert.Equal(t, 1, mock.GetCallCount(), "should call underlying implementation once")
 }
 
+// TestRateLimitMiddleware_ZeroRateLimit tests the behavior of the rate limit
+// middleware when the rate limit is set to zero.
 func TestRateLimitMiddleware_ZeroRateLimit(t *testing.T) {
-	// Given a rate limiter with zero rate (no requests allowed)
 	mock := NewMockCoreLLM()
 	middleware := RateLimitMiddleware(rate.Limit(0), 0)
 	wrapped := middleware(mock)
 
-	// When making a request with short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 
-	// Then it should fail due to rate limiting
 	require.Error(t, err, "request should fail")
 	assert.Contains(t, err.Error(), "rate limit", "should contain rate limit error")
 	assert.Equal(t, 0, mock.GetCallCount(), "should not call underlying implementation")
 }
 
+// TestRateLimitMiddleware_HighBurstWithLowRate tests the behavior of the rate
+// limit middleware with a high burst allowance but a low sustained rate.
 func TestRateLimitMiddleware_HighBurstWithLowRate(t *testing.T) {
-	// Given a rate limiter with high burst but low sustained rate
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 5 * time.Millisecond
-	middleware := RateLimitMiddleware(rate.Limit(1), 10) // 1 per second, burst of 10
+	middleware := RateLimitMiddleware(rate.Limit(1), 10)
 	wrapped := middleware(mock)
 
-	// When making burst requests
 	ctx := context.Background()
 	var fastRequests int
 
@@ -263,11 +253,9 @@ func TestRateLimitMiddleware_HighBurstWithLowRate(t *testing.T) {
 		}
 	}
 
-	// Then all burst requests should succeed quickly
 	assert.Equal(t, 10, fastRequests, "all burst requests should be fast")
 	assert.Equal(t, 10, mock.GetCallCount(), "should call underlying implementation 10 times")
 
-	// Additional request should be delayed
 	start := time.Now()
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 	duration := time.Since(start)

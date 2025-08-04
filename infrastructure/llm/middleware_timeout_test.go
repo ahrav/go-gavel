@@ -10,19 +10,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestTimeoutMiddleware_SucceedsWithinTimeout tests that the timeout middleware
+// allows a request to succeed if it completes within the specified timeout.
 func TestTimeoutMiddleware_SucceedsWithinTimeout(t *testing.T) {
-	// Given a mock that responds quickly
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 10 * time.Millisecond
 	timeout := 100 * time.Millisecond
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When making a request
 	ctx := context.Background()
 	response, tokensIn, tokensOut, err := wrapped.DoRequest(ctx, "test prompt", nil)
 
-	// Then it should succeed
 	require.NoError(t, err, "request should succeed within timeout")
 	assert.Equal(t, "test response", response, "response should match")
 	assert.Equal(t, 10, tokensIn, "input tokens should match")
@@ -30,40 +29,38 @@ func TestTimeoutMiddleware_SucceedsWithinTimeout(t *testing.T) {
 	assert.Equal(t, 1, mock.GetCallCount(), "should call underlying implementation once")
 }
 
+// TestTimeoutMiddleware_FailsWhenExceedingTimeout tests that the timeout middleware
+// correctly times out a request that exceeds the specified timeout.
 func TestTimeoutMiddleware_FailsWhenExceedingTimeout(t *testing.T) {
-	// Given a mock that responds slowly
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 200 * time.Millisecond
 	timeout := 50 * time.Millisecond
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When making a request
 	ctx := context.Background()
 	start := time.Now()
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 	duration := time.Since(start)
 
-	// Then it should timeout
 	require.Error(t, err, "request should timeout")
 	assert.True(t, errors.Is(err, context.DeadlineExceeded),
 		"error should be deadline exceeded: %v", err)
 	assert.Equal(t, 1, mock.GetCallCount(), "should call underlying implementation once")
 
-	// Should timeout close to the configured timeout
 	assert.Greater(t, duration, timeout, "should timeout after configured duration")
 	assert.Less(t, duration, timeout+50*time.Millisecond, "should not wait much longer than timeout")
 }
 
+// TestTimeoutMiddleware_RespectsExistingContextTimeout tests that the timeout
+// middleware respects a shorter timeout defined in the request's context.
 func TestTimeoutMiddleware_RespectsExistingContextTimeout(t *testing.T) {
-	// Given a mock that responds slowly
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 200 * time.Millisecond
 	middlewareTimeout := 300 * time.Millisecond
 	middleware := TimeoutMiddleware(middlewareTimeout)
 	wrapped := middleware(mock)
 
-	// When making a request with a shorter context timeout
 	ctxTimeout := 50 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
 	defer cancel()
@@ -72,48 +69,45 @@ func TestTimeoutMiddleware_RespectsExistingContextTimeout(t *testing.T) {
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 	duration := time.Since(start)
 
-	// Then it should respect the shorter context timeout
 	require.Error(t, err, "request should timeout")
 	assert.True(t, errors.Is(err, context.DeadlineExceeded),
 		"error should be deadline exceeded: %v", err)
 
-	// Should timeout close to the context timeout, not the middleware timeout
 	assert.Greater(t, duration, ctxTimeout, "should timeout after context duration")
 	assert.Less(t, duration, ctxTimeout+50*time.Millisecond, "should not wait much longer than context timeout")
 	assert.Less(t, duration, middlewareTimeout, "should timeout before middleware timeout")
 }
 
+// TestTimeoutMiddleware_HandlesImmediateError tests that the timeout middleware
+// correctly handles an immediate error from the underlying LLM without waiting
+// for the timeout.
 func TestTimeoutMiddleware_HandlesImmediateError(t *testing.T) {
-	// Given a mock that fails immediately
 	mock := NewMockCoreLLM()
 	mock.Error = errors.New("immediate error")
 	timeout := 100 * time.Millisecond
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When making a request
 	ctx := context.Background()
 	start := time.Now()
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 	duration := time.Since(start)
 
-	// Then it should fail immediately with the original error
 	require.Error(t, err, "request should fail")
 	assert.Equal(t, "immediate error", err.Error(), "should return original error")
 	assert.Equal(t, 1, mock.GetCallCount(), "should call underlying implementation once")
 
-	// Should not wait for timeout
 	assert.Less(t, duration, 50*time.Millisecond, "should fail immediately")
 }
 
+// TestTimeoutMiddleware_PassesThroughModelMethods tests that the timeout middleware
+// correctly passes through calls to the underlying CoreLLM's methods.
 func TestTimeoutMiddleware_PassesThroughModelMethods(t *testing.T) {
-	// Given a wrapped mock
 	mock := NewMockCoreLLM()
 	timeout := 100 * time.Millisecond
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When calling model methods
 	assert.Equal(t, "test-model", wrapped.GetModel(), "should pass through GetModel")
 
 	wrapped.SetModel("new-model")
@@ -121,19 +115,18 @@ func TestTimeoutMiddleware_PassesThroughModelMethods(t *testing.T) {
 	assert.Equal(t, "new-model", mock.GetModel(), "should update underlying mock")
 }
 
+// TestTimeoutMiddleware_PreservesContextValues tests that the timeout middleware
+// preserves context values across the request.
 func TestTimeoutMiddleware_PreservesContextValues(t *testing.T) {
-	// Given a mock that succeeds
 	mock := NewMockCoreLLM()
 	timeout := 100 * time.Millisecond
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When making a request with context values
 	ctx := context.WithValue(context.Background(), testContextKey, "test-value")
 	opts := map[string]any{"temperature": 0.7}
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", opts)
 
-	// Then context values should be preserved
 	require.NoError(t, err, "request should succeed")
 	assert.Equal(t, "test prompt", mock.LastPrompt, "prompt should be preserved")
 	assert.Equal(t, opts, mock.LastOpts, "options should be preserved")
@@ -141,18 +134,17 @@ func TestTimeoutMiddleware_PreservesContextValues(t *testing.T) {
 		"context value should be preserved")
 }
 
+// TestTimeoutMiddleware_HandlesContextCancellation tests that the timeout middleware
+// correctly handles context cancellation.
 func TestTimeoutMiddleware_HandlesContextCancellation(t *testing.T) {
-	// Given a mock that responds slowly
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 200 * time.Millisecond
-	timeout := 300 * time.Millisecond // Longer than response delay
+	timeout := 300 * time.Millisecond
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When making a request and cancelling context early
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Cancel after 50ms
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
@@ -162,68 +154,63 @@ func TestTimeoutMiddleware_HandlesContextCancellation(t *testing.T) {
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 	duration := time.Since(start)
 
-	// Then it should fail with cancellation error
 	require.Error(t, err, "request should be cancelled")
 	assert.True(t, errors.Is(err, context.Canceled),
 		"error should be context cancelled: %v", err)
 
-	// Should be cancelled quickly
 	assert.Greater(t, duration, 40*time.Millisecond, "should wait for cancellation")
 	assert.Less(t, duration, 100*time.Millisecond, "should be cancelled quickly")
 }
 
+// TestTimeoutMiddleware_ZeroTimeout tests the behavior of the timeout middleware
+// when the timeout is set to zero.
 func TestTimeoutMiddleware_ZeroTimeout(t *testing.T) {
-	// Given a middleware with zero timeout
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 10 * time.Millisecond
 	timeout := 0 * time.Millisecond
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When making a request
 	ctx := context.Background()
 	_, _, _, err := wrapped.DoRequest(ctx, "test prompt", nil)
 
-	// Then it should timeout immediately
 	require.Error(t, err, "request should timeout immediately")
 	assert.True(t, errors.Is(err, context.DeadlineExceeded),
 		"error should be deadline exceeded: %v", err)
 }
 
+// TestTimeoutMiddleware_VeryLongTimeout tests that the timeout middleware does
+// not unnecessarily delay a request when a very long timeout is set.
 func TestTimeoutMiddleware_VeryLongTimeout(t *testing.T) {
-	// Given a middleware with very long timeout
 	mock := NewMockCoreLLM()
 	mock.ResponseDelay = 10 * time.Millisecond
 	timeout := 10 * time.Second
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When making a request
 	ctx := context.Background()
 	start := time.Now()
 	response, tokensIn, tokensOut, err := wrapped.DoRequest(ctx, "test prompt", nil)
 	duration := time.Since(start)
 
-	// Then it should succeed normally
 	require.NoError(t, err, "request should succeed")
 	assert.Equal(t, "test response", response, "response should match")
 	assert.Equal(t, 10, tokensIn, "input tokens should match")
 	assert.Equal(t, 20, tokensOut, "output tokens should match")
 
-	// Should not wait for timeout
 	assert.Less(t, duration, 100*time.Millisecond, "should not wait for long timeout")
 }
 
+// TestTimeoutMiddleware_MultipleSimultaneousRequests tests that the timeout
+// middleware correctly handles multiple simultaneous requests.
 func TestTimeoutMiddleware_MultipleSimultaneousRequests(t *testing.T) {
-	// Given a middleware with timeout
 	mock := NewMockCoreLLM()
-	mock.ResponseDelay = 10 * time.Millisecond // Reduced delay
-	timeout := 200 * time.Millisecond          // Increased timeout
+	mock.ResponseDelay = 10 * time.Millisecond
+	timeout := 200 * time.Millisecond
 	middleware := TimeoutMiddleware(timeout)
 	wrapped := middleware(mock)
 
-	// When making multiple simultaneous requests
-	const numRequests = 3 // Reduced number
+	const numRequests = 3
 	errors := make(chan error, numRequests)
 
 	for i := range numRequests {
@@ -234,7 +221,6 @@ func TestTimeoutMiddleware_MultipleSimultaneousRequests(t *testing.T) {
 		}(i)
 	}
 
-	// Then all requests should succeed
 	for i := range numRequests {
 		select {
 		case err := <-errors:

@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestWordBasedTokenEstimator_EstimatesBasedOnWordCount tests that the
+// word-based token estimator correctly estimates tokens based on word count.
 func TestWordBasedTokenEstimator_EstimatesBasedOnWordCount(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -61,23 +63,25 @@ func TestWordBasedTokenEstimator_EstimatesBasedOnWordCount(t *testing.T) {
 	}
 }
 
+// TestWordBasedTokenEstimator_UsesDefaultRatio tests that the word-based token
+// estimator falls back to the default ratio when an invalid ratio is provided.
 func TestWordBasedTokenEstimator_UsesDefaultRatio(t *testing.T) {
-	// Given an estimator with zero/negative ratio (should use default)
 	estimator1 := NewWordBasedTokenEstimator(0)
 	estimator2 := NewWordBasedTokenEstimator(-1.5)
 
 	text := "test sentence with four words"
-	expected := int(4 * 0.75) // 4 words * default 0.75 = 3
+	expected := int(4 * 0.75)
 
-	// When estimating tokens
 	tokens1 := estimator1.EstimateTokens(text)
 	tokens2 := estimator2.EstimateTokens(text)
 
-	// Then both should use default ratio
 	assert.Equal(t, expected, tokens1, "should use default ratio for zero")
 	assert.Equal(t, expected, tokens2, "should use default ratio for negative")
 }
 
+// TestCharacterBasedTokenEstimator_EstimatesBasedOnCharacterCount tests that
+// the character-based token estimator correctly estimates tokens based on
+// character count.
 func TestCharacterBasedTokenEstimator_EstimatesBasedOnCharacterCount(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -126,23 +130,24 @@ func TestCharacterBasedTokenEstimator_EstimatesBasedOnCharacterCount(t *testing.
 	}
 }
 
+// TestCharacterBasedTokenEstimator_UsesDefaultRatio tests that the character-based
+// token estimator falls back to the default ratio when an invalid ratio is provided.
 func TestCharacterBasedTokenEstimator_UsesDefaultRatio(t *testing.T) {
-	// Given an estimator with zero/negative ratio (should use default)
 	estimator1 := NewCharacterBasedTokenEstimator(0)
 	estimator2 := NewCharacterBasedTokenEstimator(-2.5)
 
 	text := "test string"
-	expected := int(float64(len(text)) / 4.0) // length / default 4.0
+	expected := int(float64(len(text)) / 4.0)
 
-	// When estimating tokens
 	tokens1 := estimator1.EstimateTokens(text)
 	tokens2 := estimator2.EstimateTokens(text)
 
-	// Then both should use default ratio
 	assert.Equal(t, expected, tokens1, "should use default ratio for zero")
 	assert.Equal(t, expected, tokens2, "should use default ratio for negative")
 }
 
+// TestRegexBasedTokenEstimator_EstimatesBasedOnPatterns tests that the regex-based
+// token estimator provides reasonable estimates for various text patterns.
 func TestRegexBasedTokenEstimator_EstimatesBasedOnPatterns(t *testing.T) {
 	estimator := NewRegexBasedTokenEstimator()
 
@@ -193,10 +198,11 @@ func TestRegexBasedTokenEstimator_EstimatesBasedOnPatterns(t *testing.T) {
 	}
 }
 
+// TestRegexBasedTokenEstimator_HandlesComplexText tests that the regex-based
+// token estimator can handle complex and varied text inputs without errors.
 func TestRegexBasedTokenEstimator_HandlesComplexText(t *testing.T) {
 	estimator := NewRegexBasedTokenEstimator()
 
-	// Test with a variety of text types
 	texts := []string{
 		"Regular sentence with words.",
 		"Code: if (x > 0) { return x * 2; }",
@@ -214,8 +220,9 @@ func TestRegexBasedTokenEstimator_HandlesComplexText(t *testing.T) {
 	}
 }
 
+// TestProviderSpecificTokenEstimator_RoutesByProvider tests that the provider-specific
+// estimator correctly routes to the appropriate estimator for each provider.
 func TestProviderSpecificTokenEstimator_RoutesByProvider(t *testing.T) {
-	// Given estimators for different providers
 	openaiEstimator := NewWordBasedTokenEstimator(1.0)
 	anthropicEstimator := NewWordBasedTokenEstimator(0.8)
 
@@ -225,139 +232,132 @@ func TestProviderSpecificTokenEstimator_RoutesByProvider(t *testing.T) {
 
 	text := "test sentence with four words"
 
-	// When estimating for different providers
 	openaiTokens := providerEstimator.EstimateTokensForProvider("openai", text)
 	anthropicTokens := providerEstimator.EstimateTokensForProvider("anthropic", text)
 
-	// Then different estimators should be used
 	assert.Equal(t, 5, openaiTokens, "should use OpenAI estimator (5 words * 1.0)")
 	assert.Equal(t, 4, anthropicTokens, "should use Anthropic estimator (5 words * 0.8 = 4)")
 }
 
+// TestProviderSpecificTokenEstimator_FallsBackToDefault tests that the
+// provider-specific estimator falls back to the default estimator when a
+// provider-specific one is not found.
 func TestProviderSpecificTokenEstimator_FallsBackToDefault(t *testing.T) {
-	// Given a provider estimator with custom default
 	customDefault := NewCharacterBasedTokenEstimator(2.0)
 	providerEstimator := NewProviderSpecificTokenEstimator()
 	providerEstimator.SetDefaultEstimator(customDefault)
 
-	text := "test" // 4 characters
+	text := "test"
 
-	// When estimating for unknown provider
 	tokens := providerEstimator.EstimateTokensForProvider("unknown", text)
 
-	// Then default estimator should be used
-	expected := int(4 / 2.0) // 4 chars / 2.0 = 2
+	expected := int(4 / 2.0)
 	assert.Equal(t, expected, tokens, "should use custom default estimator")
 }
 
+// TestProviderSpecificTokenEstimator_UsesBuiltinDefaultWhenNoneSet tests that
+// the provider-specific estimator uses the built-in default when no custom
+// default is set.
 func TestProviderSpecificTokenEstimator_UsesBuiltinDefaultWhenNoneSet(t *testing.T) {
-	// Given a provider estimator with no custom default
 	providerEstimator := NewProviderSpecificTokenEstimator()
 
 	text := "test sentence"
 
-	// When estimating for unknown provider
 	tokens := providerEstimator.EstimateTokensForProvider("unknown", text)
 
-	// Then built-in SimpleTokenEstimator should be used (rough word count)
 	assert.Greater(t, tokens, 0, "should estimate positive tokens")
 	assert.Less(t, tokens, 20, "should be reasonable estimate")
 }
 
+// TestProviderSpecificTokenEstimator_EstimateTokensUsesDefault tests that the
+// generic EstimateTokens method uses the default estimator.
 func TestProviderSpecificTokenEstimator_EstimateTokensUsesDefault(t *testing.T) {
-	// Given a provider estimator with custom default
 	customDefault := NewWordBasedTokenEstimator(1.5)
 	providerEstimator := NewProviderSpecificTokenEstimator()
 	providerEstimator.SetDefaultEstimator(customDefault)
 
 	text := "two words"
 
-	// When calling EstimateTokens (without provider)
 	tokens := providerEstimator.EstimateTokens(text)
 
-	// Then default estimator should be used
-	expected := int(2 * 1.5) // 2 words * 1.5 = 3
+	expected := int(2 * 1.5)
 	assert.Equal(t, expected, tokens, "should use default estimator")
 }
 
+// TestCachingTokenEstimator_CachesResults tests that the caching token estimator
+// correctly caches and retrieves results.
 func TestCachingTokenEstimator_CachesResults(t *testing.T) {
-	// Given a caching estimator wrapping a word-based estimator
 	underlying := NewWordBasedTokenEstimator(1.0)
 	cachingEstimator := NewCachingTokenEstimator(underlying, 10)
 
 	text := "cached test text"
 
-	// When estimating the same text multiple times
 	tokens1 := cachingEstimator.EstimateTokens(text)
 	tokens2 := cachingEstimator.EstimateTokens(text)
 	tokens3 := cachingEstimator.EstimateTokens(text)
 
-	// Then results should be consistent (from cache)
 	assert.Equal(t, tokens1, tokens2, "cached result should match original")
 	assert.Equal(t, tokens1, tokens3, "cached result should match original")
 	assert.Equal(t, 3, tokens1, "should estimate 3 tokens for 3 words")
 }
 
+// TestCachingTokenEstimator_DifferentTextsHaveDifferentResults tests that the
+// caching token estimator produces different results for different texts.
 func TestCachingTokenEstimator_DifferentTextsHaveDifferentResults(t *testing.T) {
-	// Given a caching estimator
 	underlying := NewWordBasedTokenEstimator(1.0)
 	cachingEstimator := NewCachingTokenEstimator(underlying, 10)
 
-	// When estimating different texts
 	tokens1 := cachingEstimator.EstimateTokens("one word")
 	tokens2 := cachingEstimator.EstimateTokens("two words here")
 
-	// Then results should be different
 	assert.NotEqual(t, tokens1, tokens2, "different texts should have different estimates")
 	assert.Equal(t, 2, tokens1, "should estimate 2 tokens for 2 words")
 	assert.Equal(t, 3, tokens2, "should estimate 3 tokens for 3 words")
 }
 
+// TestCachingTokenEstimator_RespectsMaxSize tests that the caching token
+// estimator respects the maximum cache size.
 func TestCachingTokenEstimator_RespectsMaxSize(t *testing.T) {
-	// Given a caching estimator with small cache size
 	underlying := NewWordBasedTokenEstimator(1.0)
 	cachingEstimator := NewCachingTokenEstimator(underlying, 2)
 
-	// When adding more entries than cache size
 	cachingEstimator.EstimateTokens("text one")
 	cachingEstimator.EstimateTokens("text two")
 	assert.Equal(t, 2, cachingEstimator.CacheSize(), "cache should have 2 entries")
 
 	cachingEstimator.EstimateTokens("text three")
-	// Cache size should not exceed maximum
 	assert.LessOrEqual(t, cachingEstimator.CacheSize(), 2, "cache should not exceed max size")
 }
 
+// TestCachingTokenEstimator_ClearCache tests that the cache can be cleared.
 func TestCachingTokenEstimator_ClearCache(t *testing.T) {
-	// Given a caching estimator with cached data
 	underlying := NewWordBasedTokenEstimator(1.0)
 	cachingEstimator := NewCachingTokenEstimator(underlying, 10)
 
 	cachingEstimator.EstimateTokens("test text")
 	assert.Equal(t, 1, cachingEstimator.CacheSize(), "cache should have 1 entry")
 
-	// When clearing cache
 	cachingEstimator.ClearCache()
 
-	// Then cache should be empty
 	assert.Equal(t, 0, cachingEstimator.CacheSize(), "cache should be empty after clear")
 }
 
+// TestCachingTokenEstimator_UsesDefaultMaxSize tests that the caching token
+// estimator uses a default max size when an invalid size is provided.
 func TestCachingTokenEstimator_UsesDefaultMaxSize(t *testing.T) {
-	// Given a caching estimator with zero/negative max size
 	underlying := NewWordBasedTokenEstimator(1.0)
 	cachingEstimator1 := NewCachingTokenEstimator(underlying, 0)
 	cachingEstimator2 := NewCachingTokenEstimator(underlying, -5)
 
-	// When estimating tokens
 	cachingEstimator1.EstimateTokens("test")
 	cachingEstimator2.EstimateTokens("test")
 
-	// Then both should work (using default max size)
 	assert.GreaterOrEqual(t, cachingEstimator1.CacheSize(), 0, "should handle zero max size")
 	assert.GreaterOrEqual(t, cachingEstimator2.CacheSize(), 0, "should handle negative max size")
 }
 
+// TestSimpleTokenEstimator_ProvidesBasicEstimation tests the simple token
+// estimator with various text inputs.
 func TestSimpleTokenEstimator_ProvidesBasicEstimation(t *testing.T) {
 	estimator := &SimpleTokenEstimator{}
 
@@ -388,8 +388,9 @@ func TestSimpleTokenEstimator_ProvidesBasicEstimation(t *testing.T) {
 	}
 }
 
+// TestTokenEstimators_ConsistencyAcrossEstimators tests that different token
+// estimators provide consistent and reasonable results for the same text.
 func TestTokenEstimators_ConsistencyAcrossEstimators(t *testing.T) {
-	// Given different estimators configured similarly
 	wordEstimator := NewWordBasedTokenEstimator(0.75)
 	charEstimator := NewCharacterBasedTokenEstimator(4.0)
 	regexEstimator := NewRegexBasedTokenEstimator()
@@ -397,19 +398,16 @@ func TestTokenEstimators_ConsistencyAcrossEstimators(t *testing.T) {
 
 	text := "This is a test sentence with seven words"
 
-	// When estimating tokens
 	wordTokens := wordEstimator.EstimateTokens(text)
 	charTokens := charEstimator.EstimateTokens(text)
 	regexTokens := regexEstimator.EstimateTokens(text)
 	simpleTokens := simpleEstimator.EstimateTokens(text)
 
-	// Then estimates should be in reasonable ranges
 	assert.Greater(t, wordTokens, 0, "word estimator should return positive")
 	assert.Greater(t, charTokens, 0, "char estimator should return positive")
 	assert.Greater(t, regexTokens, 0, "regex estimator should return positive")
 	assert.Greater(t, simpleTokens, 0, "simple estimator should return positive")
 
-	// All should be within reasonable bounds for this text
 	estimates := []int{wordTokens, charTokens, regexTokens, simpleTokens}
 	for i, estimate := range estimates {
 		assert.Less(t, estimate, 50, "estimate %d should be reasonable", i)
@@ -417,6 +415,8 @@ func TestTokenEstimators_ConsistencyAcrossEstimators(t *testing.T) {
 	}
 }
 
+// TestTokenEstimators_HandleEdgeCases tests that all token estimators can
+// handle various edge cases without errors.
 func TestTokenEstimators_HandleEdgeCases(t *testing.T) {
 	estimators := []TokenEstimator{
 		NewWordBasedTokenEstimator(0.75),

@@ -15,6 +15,10 @@ import (
 	"github.com/ahrav/go-gavel/internal/testutils"
 )
 
+// TestNewVerificationUnit tests the constructor for the VerificationUnit.
+// It ensures that the unit is created successfully with valid parameters and fails
+// appropriately for invalid inputs, such as an empty name, nil LLM client,
+// or invalid configuration values.
 func TestNewVerificationUnit(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -151,7 +155,9 @@ func TestNewVerificationUnit(t *testing.T) {
 	}
 }
 
-// Helper function to build state with multiple values
+// buildState is a helper function to construct a domain.State object for testing.
+// It takes a series of key-value pairs and adds them to the state,
+// handling different data types for convenience.
 func buildState(entries ...interface{}) domain.State {
 	state := domain.NewState()
 	for i := 0; i < len(entries); i += 2 {
@@ -171,6 +177,10 @@ func buildState(entries ...interface{}) domain.State {
 	return state
 }
 
+// TestVerificationUnit_Execute tests the full execution flow of the VerificationUnit.
+// It covers successful verification, handling of low-confidence scores that trigger
+// human review, and ensures that the resulting state is correctly updated.
+// It also tests failure modes, such as missing state components or LLM errors.
 func TestVerificationUnit_Execute(t *testing.T) {
 	ctx := context.Background()
 
@@ -495,6 +505,9 @@ func TestVerificationUnit_Execute(t *testing.T) {
 	}
 }
 
+// TestVerificationUnit_Validate tests the validation logic for the VerificationUnit.
+// It ensures that a unit with valid configuration and a properly configured LLM client
+// passes validation, while units with missing or invalid components fail.
 func TestVerificationUnit_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -550,6 +563,10 @@ func TestVerificationUnit_Validate(t *testing.T) {
 	}
 }
 
+// TestVerificationUnit_UnmarshalParameters tests the UnmarshalParameters method.
+// It verifies that a new VerificationUnit can be created with updated parameters
+// from a YAML node, ensuring the original unit remains unchanged and that
+// invalid YAML or configurations are correctly handled.
 func TestVerificationUnit_UnmarshalParameters(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -654,6 +671,10 @@ max_tokens: 512
 	}
 }
 
+// TestCreateVerificationUnit tests the factory function for creating a VerificationUnit.
+// It ensures that the unit can be created from a map of parameters,
+// handles type conversions correctly, applies default values, and fails when
+// required fields like the LLM client are missing.
 func TestCreateVerificationUnit(t *testing.T) {
 	mockLLM := testutils.NewMockLLMClient("test-model")
 
@@ -762,6 +783,10 @@ func TestCreateVerificationUnit(t *testing.T) {
 	}
 }
 
+// TestParseLLMResponse tests the parsing of LLM responses for the VerificationUnit.
+// It ensures that valid JSON is correctly parsed into an LLMVerificationResponse,
+// handles JSON embedded in surrounding text, and fails appropriately for
+// invalid or malformed responses.
 func TestParseLLMResponse(t *testing.T) {
 	unit := &VerificationUnit{
 		validator: testutils.NewTestValidator(),
@@ -859,6 +884,7 @@ func TestParseLLMResponse(t *testing.T) {
 	}
 }
 
+// TestDefaultVerificationConfig tests that the default configuration is created with the expected values.
 func TestDefaultVerificationConfig(t *testing.T) {
 	config := defaultVerificationConfig()
 

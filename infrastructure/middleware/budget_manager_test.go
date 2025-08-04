@@ -1,3 +1,4 @@
+// Package middleware_test contains the unit tests for the middleware package.
 package middleware
 
 import (
@@ -14,17 +15,20 @@ import (
 	"github.com/ahrav/go-gavel/internal/domain"
 )
 
-// mockUnit implements ports.Unit for testing middleware functionality.
+// mockUnit implements the ports.Unit interface for testing middleware functionality.
 type mockUnit struct {
 	name        string
 	executeFunc func(ctx context.Context, state domain.State) (domain.State, error)
 	validateErr error
 }
 
+// Name returns the mock unit's name.
 func (m *mockUnit) Name() string {
 	return m.name
 }
 
+// Execute runs the mock unit's execution logic.
+// It uses a custom function if provided, otherwise returns the state unchanged.
 func (m *mockUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
 	if m.executeFunc != nil {
 		return m.executeFunc(ctx, state)
@@ -32,22 +36,26 @@ func (m *mockUnit) Execute(ctx context.Context, state domain.State) (domain.Stat
 	return state, nil
 }
 
+// Validate returns a predefined validation error.
 func (m *mockUnit) Validate() error {
 	return m.validateErr
 }
 
-// mockBudgetObserver implements BudgetObserver for testing.
+// mockBudgetObserver implements the BudgetObserver interface for testing purposes.
+// It records calls to its methods for later inspection.
 type mockBudgetObserver struct {
 	preCheckCalls  []preCheckCall
 	postCheckCalls []postCheckCall
 	mu             sync.Mutex
 }
 
+// preCheckCall stores the arguments from a call to PreCheck.
 type preCheckCall struct {
 	usage  domain.Usage
 	budget Budget
 }
 
+// postCheckCall stores the arguments from a call to PostCheck.
 type postCheckCall struct {
 	usage   domain.Usage
 	budget  Budget
@@ -55,12 +63,14 @@ type postCheckCall struct {
 	err     error
 }
 
+// PreCheck records the usage and budget before an operation.
 func (m *mockBudgetObserver) PreCheck(ctx context.Context, usage domain.Usage, budget Budget) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.preCheckCalls = append(m.preCheckCalls, preCheckCall{usage: usage, budget: budget})
 }
 
+// PostCheck records the usage, budget, and outcome after an operation.
 func (m *mockBudgetObserver) PostCheck(ctx context.Context, usage domain.Usage, budget Budget, elapsed time.Duration, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,12 +82,14 @@ func (m *mockBudgetObserver) PostCheck(ctx context.Context, usage domain.Usage, 
 	})
 }
 
+// getCalls returns a thread-safe copy of the recorded pre-check and post-check calls.
 func (m *mockBudgetObserver) getCalls() ([]preCheckCall, []postCheckCall) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]preCheckCall(nil), m.preCheckCalls...), append([]postCheckCall(nil), m.postCheckCalls...)
 }
 
+// TestNewBudgetManager tests the successful creation of a BudgetManager.
 func TestNewBudgetManager(t *testing.T) {
 	budget := Budget{MaxTokens: 1000, MaxCalls: 10}
 	nextUnit := &mockUnit{name: "test-unit"}
@@ -90,6 +102,8 @@ func TestNewBudgetManager(t *testing.T) {
 	assert.Equal(t, observer, manager.observer)
 }
 
+// TestNewBudgetManager_PanicsWithNilUnit tests that creating a BudgetManager
+// with a nil next unit causes a panic.
 func TestNewBudgetManager_PanicsWithNilUnit(t *testing.T) {
 	budget := Budget{MaxTokens: 1000, MaxCalls: 10}
 
@@ -98,6 +112,7 @@ func TestNewBudgetManager_PanicsWithNilUnit(t *testing.T) {
 	})
 }
 
+// TestBudgetManager_Name tests that the Name method returns the correct identifier.
 func TestBudgetManager_Name(t *testing.T) {
 	budget := Budget{MaxTokens: 1000, MaxCalls: 10}
 	nextUnit := &mockUnit{name: "test-unit"}
@@ -106,6 +121,7 @@ func TestBudgetManager_Name(t *testing.T) {
 	assert.Equal(t, "BudgetManager", manager.Name())
 }
 
+// TestBudgetManager_Validate tests the validation logic for various budget configurations.
 func TestBudgetManager_Validate(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -160,56 +176,60 @@ func TestBudgetManager_Validate(t *testing.T) {
 	}
 }
 
+// TestBudgetManager_Execute_WithinLimits tests that execution succeeds
+// when usage is within the defined budget.
 func TestBudgetManager_Execute_WithinLimits(t *testing.T) {
 	budget := Budget{MaxTokens: 1000, MaxCalls: 10}
 	nextUnit := &mockUnit{
 		name: "test-unit",
 		executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
-			// Simulate token usage during execution
+			// Simulate token usage during execution.
 			return state.UpdateBudgetUsage(100, 1), nil
 		},
 	}
 	observer := &mockBudgetObserver{}
 	manager := NewBudgetManager(budget, nextUnit, observer)
 
-	// Create state with some existing usage
+	// Create state with some existing usage.
 	state := domain.NewState().UpdateBudgetUsage(200, 2)
 
 	result, err := manager.Execute(context.Background(), state)
 
 	require.NoError(t, err)
 
-	// Verify final usage (existing + new)
+	// Verify final usage is the sum of existing and new usage.
 	finalUsage := result.GetBudgetUsage()
 	assert.Equal(t, int64(300), finalUsage.Tokens)
 	assert.Equal(t, int64(3), finalUsage.Calls)
 
-	// Verify observer calls
+	// Verify that the observer was called correctly.
 	preCalls, postCalls := observer.getCalls()
 	assert.Len(t, preCalls, 1)
 	assert.Len(t, postCalls, 1)
 
-	// Verify pre-check called with initial usage
+	// Verify pre-check was called with the initial usage.
 	assert.Equal(t, int64(200), preCalls[0].usage.Tokens)
 	assert.Equal(t, int64(2), preCalls[0].usage.Calls)
 
-	// Verify post-check called with final usage
+	// Verify post-check was called with the final usage.
 	assert.Equal(t, int64(300), postCalls[0].usage.Tokens)
 	assert.Equal(t, int64(3), postCalls[0].usage.Calls)
 	assert.NoError(t, postCalls[0].err)
 }
 
+// TestBudgetManager_Execute_ExceedsTokenLimit tests that execution fails
+// before the next unit is called if the token budget is already exceeded.
 func TestBudgetManager_Execute_ExceedsTokenLimit(t *testing.T) {
 	budget := Budget{MaxTokens: 100, MaxCalls: 10}
 	nextUnit := &mockUnit{name: "test-unit"}
 	manager := NewBudgetManager(budget, nextUnit, nil)
 
-	// Create state that exceeds token limit
+	// Create state that exceeds the token limit.
 	state := domain.NewState().UpdateBudgetUsage(200, 2)
 
 	result, err := manager.Execute(context.Background(), state)
 
-	// Should fail before executing next unit
+	// The operation should fail before executing the next unit.
 	assert.Error(t, err)
 	var budgetErr *domain.BudgetExceededError
 	assert.ErrorAs(t, err, &budgetErr)
@@ -217,21 +237,23 @@ func TestBudgetManager_Execute_ExceedsTokenLimit(t *testing.T) {
 	assert.Equal(t, 100, budgetErr.Limit)
 	assert.Equal(t, 200, budgetErr.Used)
 
-	// State should be unchanged
+	// The state should be unchanged on failure.
 	assert.Equal(t, state, result)
 }
 
+// TestBudgetManager_Execute_ExceedsCallLimit tests that execution fails
+// before the next unit is called if the call budget is already exceeded.
 func TestBudgetManager_Execute_ExceedsCallLimit(t *testing.T) {
 	budget := Budget{MaxTokens: 1000, MaxCalls: 5}
 	nextUnit := &mockUnit{name: "test-unit"}
 	manager := NewBudgetManager(budget, nextUnit, nil)
 
-	// Create state that exceeds call limit
+	// Create state that exceeds the call limit.
 	state := domain.NewState().UpdateBudgetUsage(100, 10)
 
 	result, err := manager.Execute(context.Background(), state)
 
-	// Should fail before executing next unit
+	// The operation should fail before executing the next unit.
 	assert.Error(t, err)
 	var budgetErr *domain.BudgetExceededError
 	assert.ErrorAs(t, err, &budgetErr)
@@ -239,38 +261,42 @@ func TestBudgetManager_Execute_ExceedsCallLimit(t *testing.T) {
 	assert.Equal(t, 5, budgetErr.Limit)
 	assert.Equal(t, 10, budgetErr.Used)
 
-	// State should be unchanged
+	// The state should be unchanged on failure.
 	assert.Equal(t, state, result)
 }
 
+// TestBudgetManager_Execute_ExceedsLimitAfterExecution tests that execution fails
+// if the budget is exceeded after the next unit has been executed.
 func TestBudgetManager_Execute_ExceedsLimitAfterExecution(t *testing.T) {
 	budget := Budget{MaxTokens: 150, MaxCalls: 10}
 	nextUnit := &mockUnit{
 		name: "test-unit",
 		executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
-			// This will push us over the limit
+			// This usage update will push the total over the budget limit.
 			return state.UpdateBudgetUsage(100, 1), nil
 		},
 	}
 	manager := NewBudgetManager(budget, nextUnit, nil)
 
-	// Start with usage just under the limit
+	// Start with usage just under the limit.
 	state := domain.NewState().UpdateBudgetUsage(100, 2)
 
 	result, err := manager.Execute(context.Background(), state)
 
-	// Should fail after execution
+	// The operation should fail after execution.
 	assert.Error(t, err)
 	var budgetErr *domain.BudgetExceededError
 	assert.ErrorAs(t, err, &budgetErr)
 	assert.Equal(t, "tokens", budgetErr.LimitType)
 
-	// State should contain the updates from execution
+	// The state should contain the updates from the execution, even on failure.
 	finalUsage := result.GetBudgetUsage()
 	assert.Equal(t, int64(200), finalUsage.Tokens)
 	assert.Equal(t, int64(3), finalUsage.Calls)
 }
 
+// TestBudgetManager_Execute_WithoutObserver tests that the BudgetManager
+// functions correctly even when no observer is provided.
 func TestBudgetManager_Execute_WithoutObserver(t *testing.T) {
 	budget := Budget{MaxTokens: 1000, MaxCalls: 10}
 	nextUnit := &mockUnit{
@@ -279,7 +305,7 @@ func TestBudgetManager_Execute_WithoutObserver(t *testing.T) {
 			return state.UpdateBudgetUsage(100, 1), nil
 		},
 	}
-	manager := NewBudgetManager(budget, nextUnit, nil) // No observer
+	manager := NewBudgetManager(budget, nextUnit, nil) // No observer provided.
 
 	state := domain.NewState().UpdateBudgetUsage(200, 2)
 
@@ -287,12 +313,14 @@ func TestBudgetManager_Execute_WithoutObserver(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Verify execution still works without observer
+	// Verify that execution still works as expected without an observer.
 	finalUsage := result.GetBudgetUsage()
 	assert.Equal(t, int64(300), finalUsage.Tokens)
 	assert.Equal(t, int64(3), finalUsage.Calls)
 }
 
+// TestBudgetManager_Execute_NextUnitError tests that an error from the next unit
+// is propagated correctly and observed.
 func TestBudgetManager_Execute_NextUnitError(t *testing.T) {
 	budget := Budget{MaxTokens: 1000, MaxCalls: 10}
 	expectedErr := errors.New("unit execution failed")
@@ -309,20 +337,22 @@ func TestBudgetManager_Execute_NextUnitError(t *testing.T) {
 
 	result, err := manager.Execute(context.Background(), state)
 
-	// Should return the error from next unit
+	// The error from the next unit should be returned.
 	assert.Equal(t, expectedErr, err)
 
-	// Observer should be called with the error
+	// The observer should be called with the error.
 	_, postCalls := observer.getCalls()
 	assert.Len(t, postCalls, 1)
 	assert.Equal(t, expectedErr, postCalls[0].err)
 
-	// Budget limits should not be checked after failure
+	// The state should not be checked against budget limits after a failure.
 	assert.Equal(t, state, result)
 }
 
+// TestBudgetManager_Execute_UnlimitedBudget tests that setting budget limits to zero
+// effectively disables budget checking.
 func TestBudgetManager_Execute_UnlimitedBudget(t *testing.T) {
-	budget := Budget{MaxTokens: 0, MaxCalls: 0} // Unlimited
+	budget := Budget{MaxTokens: 0, MaxCalls: 0} // A zero value means unlimited.
 	nextUnit := &mockUnit{
 		name: "test-unit",
 		executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
@@ -337,17 +367,19 @@ func TestBudgetManager_Execute_UnlimitedBudget(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Should allow unlimited usage
+	// The operation should succeed regardless of the high usage.
 	finalUsage := result.GetBudgetUsage()
 	assert.Equal(t, int64(1099999), finalUsage.Tokens)
 	assert.Equal(t, int64(1099999), finalUsage.Calls)
 }
 
+// TestBudgetFromConfig tests the conversion from an application.BudgetConfig
+// to a middleware.Budget, ensuring correct field mapping.
 func TestBudgetFromConfig(t *testing.T) {
 	config := application.BudgetConfig{
 		MaxTokens: 1000,
 		MaxCalls:  50,
-		MaxCost:   10.0, // This should be ignored
+		MaxCost:   10.0, // This field should be ignored by BudgetFromConfig.
 	}
 
 	budget := BudgetFromConfig(config)
@@ -356,14 +388,14 @@ func TestBudgetFromConfig(t *testing.T) {
 	assert.Equal(t, int64(50), budget.MaxCalls)
 }
 
-// TestBudgetManager_ConcurrentExecution verifies that the budget manager
-// is thread-safe and doesn't have race conditions.
+// TestBudgetManager_ConcurrentExecution verifies that the BudgetManager is thread-safe
+// and handles concurrent requests without race conditions.
 func TestBudgetManager_ConcurrentExecution(t *testing.T) {
 	budget := Budget{MaxTokens: 10000, MaxCalls: 1000}
 	nextUnit := &mockUnit{
 		name: "test-unit",
 		executeFunc: func(ctx context.Context, state domain.State) (domain.State, error) {
-			// Simulate some work and token usage
+			// Simulate some work and token usage.
 			time.Sleep(1 * time.Millisecond)
 			return state.UpdateBudgetUsage(10, 1), nil
 		},
@@ -375,13 +407,13 @@ func TestBudgetManager_ConcurrentExecution(t *testing.T) {
 	results := make([]domain.Usage, numGoroutines)
 	errors := make([]error, numGoroutines)
 
-	// Run multiple executions concurrently
+	// Run multiple executions concurrently.
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
 
-			// Each goroutine starts with different initial usage
+			// Each goroutine starts with a different initial usage.
 			state := domain.NewState().UpdateBudgetUsage(int64(index), int64(index))
 			result, err := manager.Execute(context.Background(), state)
 
@@ -392,13 +424,13 @@ func TestBudgetManager_ConcurrentExecution(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify all executions succeeded
+	// Verify that all executions succeeded and tracked usage correctly.
 	for i := 0; i < numGoroutines; i++ {
 		assert.NoError(t, errors[i], "execution %d should not fail", i)
 
-		// Each execution should have its own isolated budget tracking
-		expectedTokens := int64(i + 10) // initial + added
-		expectedCalls := int64(i + 1)   // initial + added
+		// Each execution's budget is independent and should be tracked correctly.
+		expectedTokens := int64(i + 10) // initial + added.
+		expectedCalls := int64(i + 1)   // initial + added.
 
 		assert.Equal(t, expectedTokens, results[i].Tokens, "execution %d tokens", i)
 		assert.Equal(t, expectedCalls, results[i].Calls, "execution %d calls", i)
@@ -423,13 +455,13 @@ func TestBudgetManager_ConcurrentExecutionWithLimits(t *testing.T) {
 	errorCount := int64(0)
 	var mu sync.Mutex
 
-	// Run multiple executions concurrently with different initial states
+	// Run multiple executions concurrently with different initial states.
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
 
-			// Some will exceed limits, some won't
+			// Some executions will exceed limits, while others will not.
 			initialTokens := int64(index * 10)
 			initialCalls := int64(index)
 
@@ -448,7 +480,7 @@ func TestBudgetManager_ConcurrentExecutionWithLimits(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify that some succeeded and some failed based on their limits
+	// Verify that some executions succeeded and some failed as expected.
 	assert.Greater(t, successCount, int64(0), "some executions should succeed")
 	assert.Greater(t, errorCount, int64(0), "some executions should fail due to limits")
 	assert.Equal(t, int64(numGoroutines), successCount+errorCount, "all executions should complete")

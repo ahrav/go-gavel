@@ -11,6 +11,10 @@ import (
 	"github.com/ahrav/go-gavel/internal/domain"
 )
 
+// TestMaxPoolUnit_Aggregate tests the core aggregation logic of the MaxPoolUnit.
+// It verifies that the unit correctly identifies the maximum score,
+// selects the corresponding winning candidate, and handles tie-breaking scenarios,
+// minimum score requirements, and invalid inputs.
 func TestMeanPoolUnit_Aggregate(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -170,6 +174,10 @@ func TestMeanPoolUnit_Aggregate(t *testing.T) {
 	}
 }
 
+// TestMaxPoolUnit_Execute tests the full execution flow of the MaxPoolUnit.
+// It ensures that the unit correctly processes the state, aggregates scores by finding the maximum,
+// and produces a verdict with the correct winner and aggregate score.
+// It also tests failure modes, such as missing answers or judge scores.
 func TestMeanPoolUnit_Execute(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -324,6 +332,9 @@ func TestMeanPoolUnit_Execute(t *testing.T) {
 	}
 }
 
+// TestMaxPoolUnit_Validate tests the configuration validation for the MaxPoolUnit.
+// It ensures that valid configurations are accepted and that invalid ones,
+// such as an incorrect tie-breaker or an out-of-range minimum score, are rejected.
 func TestMeanPoolUnit_Validate(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -381,6 +392,8 @@ func TestMeanPoolUnit_Validate(t *testing.T) {
 	}
 }
 
+// TestMaxPoolUnit_Name tests that the Name method returns the identifier
+// assigned to the MaxPoolUnit at creation.
 func TestMeanPoolUnit_Name(t *testing.T) {
 	config := MaxPoolConfig{
 		TieBreaker:       "first",

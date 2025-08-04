@@ -12,6 +12,10 @@ import (
 	"github.com/ahrav/go-gavel/internal/domain"
 )
 
+// TestArithmeticMeanUnit_Aggregate tests the core aggregation logic of the ArithmeticMeanUnit.
+// It verifies that the unit correctly calculates the arithmetic mean of scores,
+// identifies the winning candidate based on the highest individual score,
+// and handles tie-breaking, minimum score requirements, and invalid inputs.
 func TestArithmeticMeanUnit_Aggregate(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -153,6 +157,10 @@ func TestArithmeticMeanUnit_Aggregate(t *testing.T) {
 	}
 }
 
+// TestArithmeticMeanUnit_Execute tests the full execution flow of the ArithmeticMeanUnit.
+// It ensures that the unit correctly processes the state, aggregates scores,
+// and produces a verdict with the correct winner and aggregate score.
+// It also tests failure modes, such as missing answers or judge scores in the state.
 func TestArithmeticMeanUnit_Execute(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -307,6 +315,9 @@ func TestArithmeticMeanUnit_Execute(t *testing.T) {
 	}
 }
 
+// TestArithmeticMeanUnit_Validate tests the configuration validation for the ArithmeticMeanUnit.
+// It ensures that valid configurations are accepted and that invalid ones,
+// such as an incorrect tie-breaker or an out-of-range minimum score, are rejected.
 func TestArithmeticMeanUnit_Validate(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -364,6 +375,8 @@ func TestArithmeticMeanUnit_Validate(t *testing.T) {
 	}
 }
 
+// TestArithmeticMeanUnit_Name tests that the Name method returns the identifier
+// assigned to the ArithmeticMeanUnit at creation.
 func TestArithmeticMeanUnit_Name(t *testing.T) {
 	config := ArithmeticMeanConfig{
 		TieBreaker:       "first",
@@ -377,6 +390,9 @@ func TestArithmeticMeanUnit_Name(t *testing.T) {
 	assert.Equal(t, "test_aggregator", unit.Name())
 }
 
+// TestCreateArithmeticMeanUnit tests the factory function for creating an ArithmeticMeanUnit.
+// It verifies that the unit can be created with both default and custom configurations
+// and that it fails correctly when an empty name is provided.
 func TestCreateArithmeticMeanUnit(t *testing.T) {
 	t.Run("creates unit with default config", func(t *testing.T) {
 		config := map[string]any{}
@@ -418,6 +434,9 @@ func TestCreateArithmeticMeanUnit(t *testing.T) {
 	})
 }
 
+// TestArithmeticMeanUnit_UnmarshalParameters tests the UnmarshalParameters method.
+// It ensures that a new ArithmeticMeanUnit can be created with updated parameters from a YAML node
+// and that invalid YAML or configurations are properly handled.
 func TestArithmeticMeanUnit_UnmarshalParameters(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -491,6 +510,7 @@ min_score: 1.5
 	}
 }
 
+// TestDefaultArithmeticMeanConfig tests that the default configuration is created with the expected values.
 func TestDefaultArithmeticMeanConfig(t *testing.T) {
 	config := DefaultArithmeticMeanConfig()
 
