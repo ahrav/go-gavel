@@ -1,0 +1,163 @@
+# Multi-Provider LLM Evaluation Example
+# This configuration demonstrates using multiple LLM providers within a single evaluation graph
+
+version: "1.0.0"
+
+metadata:
+  name: "multi-provider-qa-evaluation"
+  description: "Question-answering evaluation using judges from different LLM providers"
+  author: "go-gavel team"
+  tags:
+    - multi-provider
+    - diverse-evaluation
+    - bias-reduction
+
+# Define evaluation units with different providers
+units:
+  # Answerer unit using OpenAI
+  - id: qa-generator
+    type: answerer
+    model: openai/gpt-4  # Using OpenAI's GPT-4 for answer generation
+    budget:
+      max_tokens: 2000
+      max_calls: 5
+    parameters:
+      num_answers: 3
+      prompt: |
+        Please provide a comprehensive answer to the following question:
+        {{.Question}}
+
+        Your answer should be informative, accurate, and well-structured.
+      temperature: 0.7
+      max_tokens: 500
+      timeout: "30s"
+      max_concurrency: 3
+
+  # First judge using OpenAI
+  - id: openai-judge
+    type: score_judge
+    model: openai/gpt-4  # OpenAI judge for evaluation
+    budget:
+      max_tokens: 1500
+      max_calls: 10
+    parameters:
+      judge_prompt: |
+        Evaluate the following answer to the question "{{.Question}}":
+
+        Answer: {{.Answer}}
+
+        Provide a score from 0.0 to 1.0 based on:
+        - Accuracy and correctness
+        - Completeness
+        - Clarity and structure
+        - Relevance to the question
+
+        Be critical but fair in your evaluation.
+      score_scale: "0.0-1.0"
+      temperature: 0.3  # Lower temperature for more consistent judging
+      max_tokens: 200
+      min_confidence: 0.8
+
+  # Second judge using Anthropic Claude
+  - id: anthropic-judge
+    type: score_judge
+    model: anthropic/claude-3-sonnet  # Anthropic's Claude for different perspective
+    budget:
+      max_tokens: 1500
+      max_calls: 10
+    parameters:
+      judge_prompt: |
+        Evaluate the following answer to the question "{{.Question}}":
+
+        Answer: {{.Answer}}
+
+        Provide a score from 0.0 to 1.0 considering:
+        - Factual accuracy
+        - Depth of explanation
+        - Practical applicability
+        - Overall quality
+
+        Focus on the substance rather than style.
+      score_scale: "0.0-1.0"
+      temperature: 0.3
+      max_tokens: 200
+      min_confidence: 0.8
+
+  # Third judge using Google Gemini
+  - id: google-judge
+    type: score_judge
+    model: google/gemini-pro  # Google's Gemini for additional diversity
+    budget:
+      max_tokens: 1500
+      max_calls: 10
+    parameters:
+      judge_prompt: |
+        Evaluate the following answer to the question "{{.Question}}":
+
+        Answer: {{.Answer}}
+
+        Score from 0.0 to 1.0 based on:
+        - Technical accuracy
+        - Comprehensiveness
+        - Logical flow
+        - Usefulness to the reader
+
+        Provide constructive feedback.
+      score_scale: "0.0-1.0"
+      temperature: 0.3
+      max_tokens: 200
+      min_confidence: 0.8
+
+  # Aggregator to combine scores from all judges
+  - id: score-aggregator
+    type: median_pool  # Using median to reduce impact of outliers
+    budget:
+      max_tokens: 0
+      max_calls: 1
+    parameters:
+      tie_breaker: "first"
+      min_score: 0.0
+      require_all_scores: true
+
+  # Final verdict unit
+  - id: verdict-generator
+    type: verification
+    model: openai/gpt-4  # Using GPT-4 for final verdict explanation
+    budget:
+      max_tokens: 1000
+      max_calls: 1
+    parameters:
+      prompt: |
+        Based on the evaluation results, explain why this answer was selected as the best:
+
+        Question: {{.Question}}
+        Selected Answer: {{.WinnerAnswer.Content}}
+        Aggregate Score: {{.AggregateScore}}
+
+        Provide a brief summary of the answer's strengths.
+      temperature: 0.5
+      max_tokens: 300
+
+# Define the evaluation pipeline
+graph:
+  pipelines:
+    - id: main-evaluation-pipeline
+      units:
+        - qa-generator        # Generate answers
+        - openai-judge       # Evaluate with OpenAI
+        - anthropic-judge    # Evaluate with Anthropic
+        - google-judge       # Evaluate with Google
+        - score-aggregator   # Combine scores
+        - verdict-generator  # Generate final verdict
+
+# Retry configuration for reliability
+retry:
+  max_attempts: 3
+  initial_delay: "1s"
+  max_delay: "30s"
+  backoff_multiplier: 2.0
+
+# Timeout configuration
+timeout:
+  default: "2m"
+  max: "5m"

@@ -1,3 +1,5 @@
+// Package application provides the core business logic and orchestration for
+// the evaluation engine.
 package application
 
 import (
@@ -17,15 +19,17 @@ import (
 	"github.com/ahrav/go-gavel/internal/ports"
 )
 
-// mockLLMClient implements ports.LLMClient for testing.
+// mockLLMClient implements the ports.LLMClient interface for testing.
 type mockLLMClient struct {
 	model string
 }
 
+// Complete returns a mock response for the LLM completion.
 func (m *mockLLMClient) Complete(ctx context.Context, prompt string, options map[string]any) (string, error) {
 	return "mock response", nil
 }
 
+// CompleteWithUsage returns a mock response and token usage for the LLM completion.
 func (m *mockLLMClient) CompleteWithUsage(ctx context.Context, prompt string, options map[string]any) (output string, tokensIn, tokensOut int, err error) {
 	tokensIn, _ = m.EstimateTokens(prompt)
 	output = "mock response"
@@ -33,31 +37,37 @@ func (m *mockLLMClient) CompleteWithUsage(ctx context.Context, prompt string, op
 	return output, tokensIn, tokensOut, nil
 }
 
+// EstimateTokens provides a mock estimation of token count.
 func (m *mockLLMClient) EstimateTokens(text string) (int, error) {
 	return len(text), nil
 }
 
+// GetModel returns the model name of the mock client.
 func (m *mockLLMClient) GetModel() string {
 	return m.model
 }
 
-// testMockUnit implements ports.Unit for testing custom factory registration.
+// testMockUnit implements the ports.Unit interface for testing custom factory registration.
 type testMockUnit struct {
 	name string
 }
 
+// Name returns the name of the mock unit.
 func (m *testMockUnit) Name() string {
 	return m.name
 }
 
+// Execute is a no-op for the mock unit.
 func (m *testMockUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
 	return state, nil
 }
 
+// Validate is a no-op for the mock unit.
 func (m *testMockUnit) Validate() error {
 	return nil
 }
 
+// TestNewDefaultUnitRegistry tests the creation of a new default unit registry.
 func TestNewDefaultUnitRegistry(t *testing.T) {
 	t.Run("creates registry with LLM client", func(t *testing.T) {
 		mockClient := &mockLLMClient{model: "test-model"}
@@ -67,7 +77,7 @@ func TestNewDefaultUnitRegistry(t *testing.T) {
 		assert.NotNil(t, registry.factories)
 		assert.Equal(t, mockClient, registry.llmClient)
 
-		// Verify built-in factories are registered.
+		// Verify that the built-in factories are registered.
 		supportedTypes := registry.GetSupportedTypes()
 		assert.Contains(t, supportedTypes, "answerer")
 		assert.Contains(t, supportedTypes, "score_judge")
@@ -83,12 +93,13 @@ func TestNewDefaultUnitRegistry(t *testing.T) {
 		assert.NotNil(t, registry.factories)
 		assert.Nil(t, registry.llmClient)
 
-		// Built-in factories should still be registered.
+		// The built-in factories should still be registered.
 		supportedTypes := registry.GetSupportedTypes()
 		assert.Len(t, supportedTypes, 6) // answerer, score_judge, verification, max_pool, mean_pool, median_pool
 	})
 }
 
+// TestCreateUnit_Success tests the successful creation of units.
 func TestCreateUnit_Success(t *testing.T) {
 	mockClient := &mockLLMClient{model: "test-model"}
 	registry := NewDefaultUnitRegistry(mockClient)
@@ -148,6 +159,7 @@ func TestCreateUnit_Success(t *testing.T) {
 	}
 }
 
+// TestCreateUnit_Errors tests error conditions during unit creation.
 func TestCreateUnit_Errors(t *testing.T) {
 	mockClient := &mockLLMClient{model: "test-model"}
 	registry := NewDefaultUnitRegistry(mockClient)
@@ -178,7 +190,7 @@ func TestCreateUnit_Errors(t *testing.T) {
 			unitType: "answerer",
 			unitID:   "bad_answerer",
 			config: map[string]any{
-				"num_answers": -1, // Invalid
+				"num_answers": -1, // Invalid value.
 				"prompt":      "test",
 			},
 			expectedError: "failed to create unit",
@@ -189,7 +201,7 @@ func TestCreateUnit_Errors(t *testing.T) {
 			unitID:   "incomplete_answerer",
 			config: map[string]any{
 				"num_answers": 1,
-				// Missing required fields: prompt, max_tokens, timeout, max_concurrency
+				// Missing required fields: prompt, max_tokens, timeout, max_concurrency.
 			},
 			expectedError: "failed to create unit",
 		},
@@ -205,6 +217,7 @@ func TestCreateUnit_Errors(t *testing.T) {
 	}
 }
 
+// TestCreateUnit_YAMLConversionErrors tests for errors during YAML conversion.
 func TestCreateUnit_YAMLConversionErrors(t *testing.T) {
 	mockClient := &mockLLMClient{model: "test-model"}
 	registry := NewDefaultUnitRegistry(mockClient)
@@ -220,7 +233,7 @@ func TestCreateUnit_YAMLConversionErrors(t *testing.T) {
 				"num_answers":     1,
 				"prompt":          "Test prompt: {{.Question}}",
 				"max_tokens":      100,
-				"timeout":         "invalid-duration", // Should fail
+				"timeout":         "invalid-duration", // Should fail.
 				"max_concurrency": 1,
 			},
 			expectedError: "failed to unmarshal answerer config",
@@ -230,7 +243,7 @@ func TestCreateUnit_YAMLConversionErrors(t *testing.T) {
 			config: map[string]any{
 				"num_answers":     1,
 				"prompt":          "Test prompt: {{.Question}}",
-				"temperature":     "not-a-number", // Should fail
+				"temperature":     "not-a-number", // Should fail.
 				"max_tokens":      100,
 				"timeout":         "30s",
 				"max_concurrency": 1,
@@ -249,6 +262,7 @@ func TestCreateUnit_YAMLConversionErrors(t *testing.T) {
 	}
 }
 
+// TestRegisterUnitFactory tests the registration of custom unit factories.
 func TestRegisterUnitFactory(t *testing.T) {
 	mockClient := &mockLLMClient{model: "test-model"}
 	registry := NewDefaultUnitRegistry(mockClient)
@@ -261,37 +275,37 @@ func TestRegisterUnitFactory(t *testing.T) {
 		err := registry.RegisterUnitFactory("custom", customFactory)
 		require.NoError(t, err)
 
-		// Verify factory is registered.
+		// Verify that the factory is registered.
 		supportedTypes := registry.GetSupportedTypes()
 		assert.Contains(t, supportedTypes, "custom")
 
-		// Create unit with custom factory.
+		// Create a unit with the custom factory.
 		unit, err := registry.CreateUnit("custom", "test_custom", nil)
 		require.NoError(t, err)
 		assert.Equal(t, "test_custom", unit.Name())
 	})
 
 	t.Run("overrides existing factory", func(t *testing.T) {
-		// Register initial factory.
+		// Register the initial factory.
 		factory1 := func(id string, config map[string]any) (ports.Unit, error) {
 			return &testMockUnit{name: "factory1_" + id}, nil
 		}
 		err := registry.RegisterUnitFactory("override_test", factory1)
 		require.NoError(t, err)
 
-		// Create unit with first factory.
+		// Create a unit with the first factory.
 		unit1, err := registry.CreateUnit("override_test", "unit", nil)
 		require.NoError(t, err)
 		assert.Equal(t, "factory1_unit", unit1.Name())
 
-		// Override with new factory.
+		// Override with a new factory.
 		factory2 := func(id string, config map[string]any) (ports.Unit, error) {
 			return &testMockUnit{name: "factory2_" + id}, nil
 		}
 		err = registry.RegisterUnitFactory("override_test", factory2)
 		require.NoError(t, err)
 
-		// Create unit with overridden factory.
+		// Create a unit with the overridden factory.
 		unit2, err := registry.CreateUnit("override_test", "unit", nil)
 		require.NoError(t, err)
 		assert.Equal(t, "factory2_unit", unit2.Name())
@@ -314,13 +328,14 @@ func TestRegisterUnitFactory(t *testing.T) {
 	})
 }
 
+// TestGetSupportedTypes tests the retrieval of supported unit types.
 func TestGetSupportedTypes(t *testing.T) {
 	mockClient := &mockLLMClient{model: "test-model"}
 	registry := NewDefaultUnitRegistry(mockClient)
 
 	t.Run("returns built-in types", func(t *testing.T) {
 		types := registry.GetSupportedTypes()
-		sort.Strings(types) // For consistent comparison
+		sort.Strings(types) // For consistent comparison.
 
 		expected := []string{"answerer", "max_pool", "arithmetic_mean", "median_pool", "score_judge", "verification"}
 		sort.Strings(expected)
@@ -329,7 +344,7 @@ func TestGetSupportedTypes(t *testing.T) {
 	})
 
 	t.Run("includes custom registered types", func(t *testing.T) {
-		// Register custom type.
+		// Register a custom type.
 		customFactory := func(id string, config map[string]any) (ports.Unit, error) {
 			return &testMockUnit{name: id}, nil
 		}
@@ -338,23 +353,24 @@ func TestGetSupportedTypes(t *testing.T) {
 
 		types := registry.GetSupportedTypes()
 		assert.Contains(t, types, "custom_type")
-		assert.Len(t, types, 7) // 6 built-in + 1 custom
+		assert.Len(t, types, 7) // 6 built-in + 1 custom.
 	})
 }
 
+// TestSetLLMClient tests setting the LLM client on the registry.
 func TestSetLLMClient(t *testing.T) {
 	initialClient := &mockLLMClient{model: "initial-model"}
 	registry := NewDefaultUnitRegistry(initialClient)
 
 	t.Run("updates LLM client", func(t *testing.T) {
-		// Verify initial client.
+		// Verify the initial client.
 		assert.Equal(t, initialClient, registry.GetLLMClient())
 
-		// Update to new client.
+		// Update to a new client.
 		newClient := &mockLLMClient{model: "new-model"}
 		registry.SetLLMClient(newClient)
 
-		// Verify client was updated.
+		// Verify that the client was updated.
 		assert.Equal(t, newClient, registry.GetLLMClient())
 	})
 
@@ -366,15 +382,15 @@ func TestSetLLMClient(t *testing.T) {
 		err := registry.RegisterUnitFactory("custom", customFactory)
 		require.NoError(t, err)
 
-		// Update LLM client.
+		// Update the LLM client.
 		newClient := &mockLLMClient{model: "updated-model"}
 		registry.SetLLMClient(newClient)
 
-		// Verify custom factory is still registered.
+		// Verify that the custom factory is still registered.
 		types := registry.GetSupportedTypes()
 		assert.Contains(t, types, "custom")
 
-		// Verify built-in factories still work with new client.
+		// Verify that the built-in factories still work with the new client.
 		unit, err := registry.CreateUnit("answerer", "test_answerer", map[string]any{
 			"num_answers":     1,
 			"prompt":          "Test: {{.Question}}",
@@ -390,12 +406,13 @@ func TestSetLLMClient(t *testing.T) {
 		registry.SetLLMClient(nil)
 		assert.Nil(t, registry.GetLLMClient())
 
-		// Registry should still function.
+		// The registry should still function.
 		types := registry.GetSupportedTypes()
 		assert.NotEmpty(t, types)
 	})
 }
 
+// TestThreadSafety_CreateUnit tests the thread safety of the CreateUnit method.
 func TestThreadSafety_CreateUnit(t *testing.T) {
 	mockClient := &mockLLMClient{model: "test-model"}
 	registry := NewDefaultUnitRegistry(mockClient)
@@ -436,6 +453,8 @@ func TestThreadSafety_CreateUnit(t *testing.T) {
 	})
 }
 
+// TestThreadSafety_RegisterAndCreate tests the thread safety of concurrent
+// registration and creation of units.
 func TestThreadSafety_RegisterAndCreate(t *testing.T) {
 	mockClient := &mockLLMClient{model: "test-model"}
 	registry := NewDefaultUnitRegistry(mockClient)
@@ -452,7 +471,7 @@ func TestThreadSafety_RegisterAndCreate(t *testing.T) {
 				defer wg.Done()
 
 				if id%2 == 0 {
-					// Register new factory.
+					// Register a new factory.
 					factory := func(unitID string, config map[string]any) (ports.Unit, error) {
 						return &testMockUnit{name: unitID}, nil
 					}
@@ -461,10 +480,10 @@ func TestThreadSafety_RegisterAndCreate(t *testing.T) {
 						errors <- err
 					}
 				} else {
-					// Create unit.
+					// Create a unit.
 					unitType := "max_pool"
 					if id > 10 {
-						unitType = fmt.Sprintf("type_%d", id-1) // Use previously registered type
+						unitType = fmt.Sprintf("type_%d", id-1) // Use a previously registered type.
 					}
 
 					_, err := registry.CreateUnit(unitType, fmt.Sprintf("unit_%d", id), nil)
@@ -485,6 +504,8 @@ func TestThreadSafety_RegisterAndCreate(t *testing.T) {
 	})
 }
 
+// TestThreadSafety_SetLLMClient tests the thread safety of setting the LLM client
+// while other operations are in progress.
 func TestThreadSafety_SetLLMClient(t *testing.T) {
 	mockClient := &mockLLMClient{model: "test-model"}
 	registry := NewDefaultUnitRegistry(mockClient)
@@ -502,17 +523,17 @@ func TestThreadSafety_SetLLMClient(t *testing.T) {
 
 				switch id % 3 {
 				case 0:
-					// Update LLM client.
+					// Update the LLM client.
 					newClient := &mockLLMClient{model: fmt.Sprintf("model-%d", id)}
 					registry.SetLLMClient(newClient)
 				case 1:
-					// Get LLM client.
+					// Get the LLM client.
 					client := registry.GetLLMClient()
 					if client == nil {
 						errs <- errors.New("GetLLMClient returned nil")
 					}
 				default:
-					// Create unit.
+					// Create a unit.
 					unit, err := registry.CreateUnit("answerer", fmt.Sprintf("unit_%d", id), map[string]any{
 						"num_answers":     1,
 						"prompt":          "Test: {{.Question}}",
@@ -541,7 +562,7 @@ func TestThreadSafety_SetLLMClient(t *testing.T) {
 	})
 }
 
-// TestRaceConditions should be run with -race flag.
+// TestRaceConditions should be run with the -race flag to detect race conditions.
 func TestRaceConditions(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping race condition test in short mode")
@@ -562,14 +583,14 @@ func TestRaceConditions(t *testing.T) {
 				operation := id % 5
 				switch operation {
 				case 0:
-					// Register factory.
+					// Register a factory.
 					factory := func(unitID string, config map[string]any) (ports.Unit, error) {
 						return &testMockUnit{name: unitID}, nil
 					}
 					_ = registry.RegisterUnitFactory(fmt.Sprintf("stress_%d", id), factory)
 
 				case 1:
-					// Create unit.
+					// Create a unit.
 					_, _ = registry.CreateUnit("max_pool", fmt.Sprintf("stress_unit_%d", id), nil)
 
 				case 2:
@@ -577,16 +598,16 @@ func TestRaceConditions(t *testing.T) {
 					_ = registry.GetSupportedTypes()
 
 				case 3:
-					// Set LLM client.
+					// Set the LLM client.
 					newClient := &mockLLMClient{model: fmt.Sprintf("stress_model_%d", id)}
 					registry.SetLLMClient(newClient)
 
 				case 4:
-					// Get LLM client.
+					// Get the LLM client.
 					_ = registry.GetLLMClient()
 				}
 
-				// Add some randomness.
+				// Add some randomness to the execution order.
 				time.Sleep(time.Microsecond * time.Duration(id))
 			}(i)
 		}
@@ -598,10 +619,10 @@ func TestRaceConditions(t *testing.T) {
 	})
 }
 
-// Helper function to determine if an error is expected in concurrent scenarios.
+// isExpectedError determines if an error is expected in concurrent scenarios.
 func isExpectedError(err error) bool {
 	// In concurrent scenarios, "unsupported unit type" is expected
-	// if we try to use a type before it's registered.
+	// if we try to use a type before it is registered.
 	if err == nil {
 		return false
 	}

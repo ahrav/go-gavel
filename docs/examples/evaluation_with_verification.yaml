@@ -1,0 +1,218 @@
+# Example evaluation graph with verification unit
+# This configuration demonstrates how to use the VerificationUnit
+# to validate judging quality and trigger human review when needed
+
+version: "1.0.0"
+
+metadata:
+  name: "evaluation-with-verification"
+  description: "Evaluation pipeline with quality verification and human review flagging"
+  trace_level: "debug"  # Enable debug to see verification trace
+
+units:
+  # Unit to generate candidate answers
+  - id: answerer1
+    type: answerer
+    budget:
+      max_tokens: 500
+    parameters:
+      answer_prompt: "Please provide a comprehensive answer to: {{.Question}}"
+      temperature: 0.7
+      max_tokens: 300
+
+  - id: answerer2
+    type: answerer
+    budget:
+      max_tokens: 500
+    parameters:
+      answer_prompt: "Generate a detailed response to: {{.Question}}"
+      temperature: 0.7
+      max_tokens: 300
+
+  - id: answerer3
+    type: answerer
+    budget:
+      max_tokens: 500
+    parameters:
+      answer_prompt: "Provide your best answer to: {{.Question}}"
+      temperature: 0.7
+      max_tokens: 300
+
+  # Unit to score each answer
+  - id: judge1
+    type: score_judge
+    budget:
+      max_tokens: 1000
+    parameters:
+      judge_prompt: |
+        Please score the following answer to the question on a scale from 1 to 10:
+
+        Question: {{.Question}}
+        Answer: {{.Answer}}
+
+        Consider accuracy, completeness, clarity, and relevance in your scoring.
+        Provide detailed reasoning for your score.
+      score_scale: "1-10"
+      temperature: 0.0
+      max_tokens: 256
+      min_confidence: 0.0
+      max_concurrency: 3
+
+  # Unit to aggregate scores and select winner
+  - id: aggregator
+    type: max_pool
+    parameters:
+      aggregation_method: "max"
+
+  # Verification unit to validate judging quality
+  - id: verifier
+    type: verification
+    budget:
+      max_tokens: 600
+    parameters:
+      prompt_template: |
+        Please verify the quality of these judge scores for the following evaluation:
+
+        Question: {{.Question}}
+
+        Answers:
+        {{range $i, $answer := .Answers}}
+        Answer {{$i}}: {{$answer.Content}}
+        {{end}}
+
+        Judge Scores:
+        {{range $i, $score := .JudgeScores}}
+        Judge {{$i}}: Score={{$score.Score}}, Confidence={{$score.Confidence}}
+        Reasoning: {{$score.Reasoning}}
+        {{end}}
+
+        Evaluate the consistency, fairness, and quality of the judging. Consider:
+        1. Are the scores consistent with the quality of the answers?
+        2. Is there any apparent bias in the scoring?
+        3. Do the scores accurately reflect the answers' strengths and weaknesses?
+        4. Is the reasoning provided by the judge clear and justified?
+
+        Provide your assessment with a confidence score (0.0-1.0) indicating how confident you are in the judging quality.
+        A confidence score below 0.8 will trigger human review.
+      confidence_threshold: 0.8  # Scores below this trigger human review
+      temperature: 0.0
+      max_tokens: 512
+
+graph:
+  # Define the execution flow
+  edges:
+    # Generate answers in parallel
+    - from: START
+      to: [answerer1, answerer2, answerer3]
+
+    # Score all answers
+    - from: [answerer1, answerer2, answerer3]
+      to: judge1
+
+    # Aggregate scores to find winner
+    - from: judge1
+      to: aggregator
+
+    # Verify the judging quality
+    - from: aggregator
+      to: verifier
+
+    # Complete the evaluation
+    - from: verifier
+      to: END
+
+# Example of a more complex verification configuration
+---
+version: "1.0.0"
+
+metadata:
+  name: "strict-verification-example"
+  description: "Example with stricter verification requirements"
+
+units:
+  # ... other units ...
+
+  - id: strict_verifier
+    type: verification
+    budget:
+      max_tokens: 1000
+    parameters:
+      prompt_template: |
+        You are a quality assurance expert reviewing an AI evaluation process.
+
+        Question being evaluated: {{.Question}}
+
+        Candidate Answers:
+        {{range $i, $answer := .Answers}}
+        [Answer {{$i}}]
+        {{$answer.Content}}
+        {{end}}
+
+        Scoring Results:
+        {{range $i, $score := .JudgeScores}}
+        [Score {{$i}}]
+        - Numerical Score: {{$score.Score}}/10
+        - Judge Confidence: {{$score.Confidence}}
+        - Reasoning: {{$score.Reasoning}}
+        {{end}}
+
+        Critical Review Points:
+        1. Score Distribution: Are scores appropriately distributed or clustered?
+        2. Reasoning Quality: Is the reasoning thorough and evidence-based?
+        3. Bias Detection: Any signs of systematic bias or unfair treatment?
+        4. Consistency Check: Do similar quality answers receive similar scores?
+        5. Edge Cases: Are any answers edge cases that need special consideration?
+
+        Provide a thorough verification with specific examples of any issues found.
+        Your confidence score should reflect the overall reliability of this evaluation.
+
+        Remember: A confidence score below 0.85 will require human review.
+      confidence_threshold: 0.85  # Stricter threshold
+      temperature: 0.0
+      max_tokens: 800
+
+# Example with custom verification for specific domains
+---
+version: "1.0.0"
+
+metadata:
+  name: "technical-verification-example"
+  description: "Verification tailored for technical/code evaluation"
+
+units:
+  - id: code_verifier
+    type: verification
+    budget:
+      max_tokens: 700
+    parameters:
+      prompt_template: |
+        Verify the evaluation of these technical/code-related answers:
+
+        Technical Question: {{.Question}}
+
+        Solutions Provided:
+        {{range $i, $answer := .Answers}}
+        Solution {{$i}}:
+        {{$answer.Content}}
+        {{end}}
+
+        Technical Evaluation Scores:
+        {{range $i, $score := .JudgeScores}}
+        Evaluation {{$i}}:
+        - Score: {{$score.Score}}/10
+        - Confidence: {{$score.Confidence}}
+        - Technical Reasoning: {{$score.Reasoning}}
+        {{end}}
+
+        Technical Verification Criteria:
+        1. Code Correctness: Were syntax and logic errors properly identified?
+        2. Performance Considerations: Were efficiency concerns addressed?
+        3. Best Practices: Were coding standards and patterns evaluated?
+        4. Security: Were potential security issues considered?
+        5. Maintainability: Was code readability and maintainability assessed?
+
+        Assess whether the technical evaluation was thorough and accurate.
+        Flag any missed issues or incorrect assessments.
+      confidence_threshold: 0.75  # May need human review for complex technical evaluations
+      temperature: 0.0
+      max_tokens: 600

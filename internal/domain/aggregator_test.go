@@ -7,10 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAggregatorInterface verifies that the Aggregator interface
-// can be implemented and used correctly.
+// TestAggregatorInterface verifies the contract of the Aggregator interface.
+// It ensures that the interface can be implemented and that its method
+// signatures are correctly defined. This test does not provide a concrete
+// implementation but validates the interface's structural requirements.
 func TestAggregatorInterface(t *testing.T) {
-	// Create test data.
 	scores := []float64{0.8, 0.9, 0.7}
 	candidates := []Answer{
 		{ID: "answer1", Content: "First answer"},
@@ -18,17 +19,14 @@ func TestAggregatorInterface(t *testing.T) {
 		{ID: "answer3", Content: "Third answer"},
 	}
 
-	// Test implementation would need to be provided.
-	// This test verifies the interface contract.
 	t.Run("interface contract", func(t *testing.T) {
-		// Verify we can declare variables of the interface type.
 		var aggregator Aggregator
 		assert.Nil(t, aggregator)
 
-		// Verify method signature is correct.
+		// The following block verifies the method signature through a nil check;
+		// it is not expected to execute.
 		if aggregator != nil {
 			winner, score, err := aggregator.Aggregate(scores, candidates)
-			// These won't execute but verify the signature.
 			_ = winner
 			_ = score
 			_ = err
@@ -36,23 +34,18 @@ func TestAggregatorInterface(t *testing.T) {
 	})
 
 	t.Run("parameter validation requirements", func(t *testing.T) {
-		// Document expected behavior for edge cases.
-		// Implementations should handle:
-		// - Empty score lists (return error)
-		// - Mismatched slice lengths (return error)
-		// - NaN or infinite values (return error)
-		// - Equal scores (implementation-specific tie-breaking)
-
-		// These are documented requirements that implementations must satisfy.
-		assert.True(t, true, "Aggregator implementations must handle empty scores")
-		assert.True(t, true, "Aggregator implementations must validate slice length consistency")
-		assert.True(t, true, "Aggregator implementations must handle NaN and infinite values")
-		assert.True(t, true, "Aggregator implementations must define tie-breaking behavior")
+		// These assertions document the expected behavior for implementations
+		// regarding edge cases. They do not test functionality directly but serve
+		// as a checklist for implementation requirements.
+		assert.True(t, true, "Aggregator implementations must handle empty scores.")
+		assert.True(t, true, "Aggregator implementations must validate slice length consistency.")
+		assert.True(t, true, "Aggregator implementations must handle NaN and infinite values.")
+		assert.True(t, true, "Aggregator implementations must define tie-breaking behavior.")
 	})
 }
 
-// TestJudgeSummaryUpdatedWithScore verifies that JudgeSummary now includes
-// the Score field as required by Story 1.3.
+// TestJudgeSummaryUpdatedWithScore verifies that the JudgeSummary struct
+// includes the Score field and that it is handled correctly.
 func TestJudgeSummaryUpdatedWithScore(t *testing.T) {
 	t.Run("score field exists", func(t *testing.T) {
 		summary := JudgeSummary{
@@ -73,14 +66,12 @@ func TestJudgeSummaryUpdatedWithScore(t *testing.T) {
 			Score:      7.8,
 		}
 
-		// Verify the Score field is accessible and has expected value.
 		assert.Equal(t, "Good analysis", summary.Reasoning)
 		assert.Equal(t, 0.9, summary.Confidence)
 		assert.Equal(t, 7.8, summary.Score)
 	})
 
 	t.Run("score field supports float64 values", func(t *testing.T) {
-		// Test various score values to ensure proper type handling.
 		testCases := []struct {
 			name  string
 			score float64
@@ -106,8 +97,8 @@ func TestJudgeSummaryUpdatedWithScore(t *testing.T) {
 	})
 }
 
-// TestAnswerStruct verifies the existing Answer struct remains compatible
-// with our new evaluation pipeline requirements.
+// TestAnswerStruct verifies the creation and basic operations of the Answer struct.
+// It ensures the struct's fields are accessible and that it can be used in slices.
 func TestAnswerStruct(t *testing.T) {
 	t.Run("answer creation and access", func(t *testing.T) {
 		answer := Answer{
@@ -136,7 +127,8 @@ func TestAnswerStruct(t *testing.T) {
 		assert.Equal(t, "", answer.ID)
 		assert.Equal(t, "", answer.Content)
 
-		// Verify empty answers can be created (though validation would catch this).
+		// Verify that an empty answer can be created,
+		// although subsequent validation should handle such cases.
 		emptyAnswer := Answer{ID: "", Content: ""}
 		assert.Equal(t, "", emptyAnswer.ID)
 		assert.Equal(t, "", emptyAnswer.Content)
