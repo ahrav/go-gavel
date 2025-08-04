@@ -494,7 +494,7 @@ func TestGraph_AddEdge(t *testing.T) {
 				err = g.AddNode(&mockExecutable{id: "node3"})
 				require.NoError(t, err)
 
-				// Create edges: 1 -> 2 -> 3
+				// Create edges: 1 -> 2 -> 3.
 				err = g.AddEdge("node1", "node2")
 				require.NoError(t, err)
 				err = g.AddEdge("node2", "node3")
@@ -503,7 +503,7 @@ func TestGraph_AddEdge(t *testing.T) {
 				return g
 			},
 			sourceID: "node3",
-			targetID: "node1", // This would create a cycle
+			targetID: "node1", // This edge would create a cycle.
 			wantErr:  true,
 			errMsg:   "cycle",
 		},
@@ -526,11 +526,15 @@ func TestGraph_AddEdge(t *testing.T) {
 	}
 }
 
+// TestGraph_TopologicalSort tests the topological sorting of a Graph.
+// It verifies that the graph's nodes are sorted in a valid execution order
+// based on their dependencies for various graph structures, including simple
+// chains, diamond patterns, and disconnected components.
 func TestGraph_TopologicalSort(t *testing.T) {
 	tests := []struct {
 		name    string
 		setup   func() ports.Graph
-		want    []string // Expected order of IDs
+		want    []string // Expected order of node IDs.
 		wantErr bool
 	}{
 		{
@@ -538,13 +542,13 @@ func TestGraph_TopologicalSort(t *testing.T) {
 			setup: func() ports.Graph {
 				g := NewGraph()
 
-				// Add nodes
+				// Add nodes.
 				for i := 1; i <= 3; i++ {
 					err := g.AddNode(&mockExecutable{id: fmt.Sprintf("node%d", i)})
 					require.NoError(t, err)
 				}
 
-				// Create chain: 1 -> 2 -> 3
+				// Create chain: 1 -> 2 -> 3.
 				err := g.AddEdge("node1", "node2")
 				require.NoError(t, err)
 				err = g.AddEdge("node2", "node3")
@@ -560,14 +564,14 @@ func TestGraph_TopologicalSort(t *testing.T) {
 			setup: func() ports.Graph {
 				g := NewGraph()
 
-				// Add nodes
+				// Add nodes.
 				nodes := []string{"A", "B", "C", "D"}
 				for _, id := range nodes {
 					err := g.AddNode(&mockExecutable{id: id})
 					require.NoError(t, err)
 				}
 
-				// Create diamond: A -> B,C -> D
+				// Create diamond: A -> B, C -> D.
 				err := g.AddEdge("A", "B")
 				require.NoError(t, err)
 				err = g.AddEdge("A", "C")
@@ -579,7 +583,7 @@ func TestGraph_TopologicalSort(t *testing.T) {
 
 				return g
 			},
-			want:    []string{"A", "B", "C", "D"}, // B and C can be in any order
+			want:    []string{"A", "B", "C", "D"}, // B and C can be in any order.
 			wantErr: false,
 		},
 		{
@@ -587,23 +591,23 @@ func TestGraph_TopologicalSort(t *testing.T) {
 			setup: func() ports.Graph {
 				g := NewGraph()
 
-				// Add two disconnected chains
+				// Add two disconnected chains.
 				for i := 1; i <= 4; i++ {
 					err := g.AddNode(&mockExecutable{id: fmt.Sprintf("node%d", i)})
 					require.NoError(t, err)
 				}
 
-				// Chain 1: 1 -> 2
+				// Chain 1: 1 -> 2.
 				err := g.AddEdge("node1", "node2")
 				require.NoError(t, err)
 
-				// Chain 2: 3 -> 4
+				// Chain 2: 3 -> 4.
 				err = g.AddEdge("node3", "node4")
 				require.NoError(t, err)
 
 				return g
 			},
-			want:    []string{"node1", "node2", "node3", "node4"}, // Order between chains doesn't matter
+			want:    []string{"node1", "node2", "node3", "node4"}, // Order between chains does not matter.
 			wantErr: false,
 		},
 	}
@@ -619,17 +623,18 @@ func TestGraph_TopologicalSort(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 
-				// Verify we have all nodes
+				// Verify that the sorted output contains all expected nodes.
 				assert.Len(t, sorted, len(tt.want))
 
-				// For simple chain, verify exact order
+				// For a simple chain, verify the exact order.
 				if tt.name == "sorts simple chain" {
 					for i, exec := range sorted {
 						assert.Equal(t, tt.want[i], exec.ID())
 					}
 				}
 
-				// For other cases, just verify all nodes are present
+				// For other cases, just verify that all expected nodes are present,
+				// as the order may vary (e.g., for parallel branches).
 				gotIDs := make(map[string]bool)
 				for _, exec := range sorted {
 					gotIDs[exec.ID()] = true

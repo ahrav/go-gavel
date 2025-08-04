@@ -1,3 +1,5 @@
+// Package application provides the core business logic and orchestration for
+// the evaluation engine.
 package application
 
 import (
@@ -13,15 +15,16 @@ import (
 	"github.com/ahrav/go-gavel/internal/testutils"
 )
 
-// TestEndToEndEvaluationPipeline tests the complete evaluation flow:
-// question → answers → scoring → aggregation → verdict
+// TestEndToEndEvaluationPipeline tests the complete evaluation flow, from question
+// to verdict. It ensures that the answerer, scoring, and aggregation units
+// work together correctly to produce a final result.
 func TestEndToEndEvaluationPipeline(t *testing.T) {
 	ctx := context.Background()
 
-	// Setup: Create mock LLM client for deterministic testing.
+	// Setup: Create a mock LLM client for deterministic testing.
 	mockLLMClient := testutils.NewMockLLMClient("test-model-v1")
 
-	// Create units for the pipeline.
+	// Create the units for the pipeline.
 	answererUnit, err := units.NewAnswererUnit("answerer1", mockLLMClient, units.AnswererConfig{
 		NumAnswers:     3,
 		Prompt:         "Please provide a comprehensive answer to: %s",
@@ -51,7 +54,7 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 
 	// Test the complete pipeline.
 	t.Run("complete evaluation pipeline", func(t *testing.T) {
-		// Step 1: Start with initial state containing a question.
+		// Step 1: Start with an initial state containing a question.
 		initialState := domain.NewState()
 		question := "What are the key benefits of using microservices architecture?"
 		initialState = domain.With(initialState, domain.KeyQuestion, question)
@@ -60,64 +63,64 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 		stateWithAnswers, err := answererUnit.Execute(ctx, initialState)
 		require.NoError(t, err)
 
-		// Verify answers were generated.
+		// Verify that the answers were generated correctly.
 		answers, ok := domain.Get(stateWithAnswers, domain.KeyAnswers)
-		require.True(t, ok, "Answers should be present in state")
+		require.True(t, ok, "Answers should be present in the state")
 		require.Len(t, answers, 3, "Should generate 3 answers as configured")
 
-		// Verify answer structure.
+		// Verify the structure of the generated answers.
 		for i, answer := range answers {
-			assert.NotEmpty(t, answer.ID, "Answer %d should have non-empty ID", i+1)
+			assert.NotEmpty(t, answer.ID, "Answer %d should have a non-empty ID", i+1)
 			assert.NotEmpty(t, answer.Content, "Answer %d should have non-empty content", i+1)
-			assert.Contains(t, answer.ID, "answerer1_answer_", "Answer ID should follow expected pattern")
+			assert.Contains(t, answer.ID, "answerer1_answer_", "Answer ID should follow the expected pattern")
 		}
 
 		// Step 3: Score the candidate answers.
 		stateWithScores, err := scoreJudgeUnit.Execute(ctx, stateWithAnswers)
 		require.NoError(t, err)
 
-		// Verify scores were generated.
+		// Verify that the scores were generated.
 		judgeSummaries, ok := domain.Get(stateWithScores, domain.KeyJudgeScores)
-		require.True(t, ok, "Judge scores should be present in state")
+		require.True(t, ok, "Judge scores should be present in the state")
 		require.Len(t, judgeSummaries, 3, "Should have scores for all 3 answers")
 
-		// Verify score structure and requirements.
+		// Verify the score structure and requirements.
 		for i, summary := range judgeSummaries {
 			assert.NotEmpty(t, summary.Reasoning, "Summary %d should have reasoning", i+1)
-			assert.GreaterOrEqual(t, summary.Confidence, 0.8, "Summary %d confidence should meet minimum", i+1)
+			assert.GreaterOrEqual(t, summary.Confidence, 0.8, "Summary %d confidence should meet the minimum", i+1)
 			assert.GreaterOrEqual(t, summary.Score, 0.0, "Summary %d score should be non-negative", i+1)
 			assert.LessOrEqual(t, summary.Score, 1.0, "Summary %d score should not exceed 1.0", i+1)
 		}
 
-		// Step 4: Aggregate scores to determine winner.
+		// Step 4: Aggregate the scores to determine a winner.
 		finalState, err := maxPoolUnit.Execute(ctx, stateWithScores)
 		require.NoError(t, err)
 
-		// Verify verdict was generated.
+		// Verify that a verdict was generated.
 		verdict, ok := domain.Get(finalState, domain.KeyVerdict)
-		require.True(t, ok, "Verdict should be present in final state")
-		require.NotNil(t, verdict, "Verdict should not be nil")
+		require.True(t, ok, "A verdict should be present in the final state")
+		require.NotNil(t, verdict, "The verdict should not be nil")
 
-		// Verify verdict structure.
-		assert.NotEmpty(t, verdict.ID, "Verdict should have non-empty ID")
-		assert.NotNil(t, verdict.WinnerAnswer, "Verdict should have a winner answer")
-		assert.GreaterOrEqual(t, verdict.AggregateScore, 0.0, "Aggregate score should be non-negative")
-		assert.LessOrEqual(t, verdict.AggregateScore, 1.0, "Aggregate score should not exceed 1.0")
+		// Verify the verdict structure.
+		assert.NotEmpty(t, verdict.ID, "The verdict should have a non-empty ID")
+		assert.NotNil(t, verdict.WinnerAnswer, "The verdict should have a winner answer")
+		assert.GreaterOrEqual(t, verdict.AggregateScore, 0.0, "The aggregate score should be non-negative")
+		assert.LessOrEqual(t, verdict.AggregateScore, 1.0, "The aggregate score should not exceed 1.0")
 
-		// Verify winner answer is one of the generated answers.
+		// Verify that the winner answer is one of the generated answers.
 		winnerFound := false
 		for _, answer := range answers {
 			if answer.ID == verdict.WinnerAnswer.ID {
 				winnerFound = true
 				assert.Equal(t, answer.Content, verdict.WinnerAnswer.Content,
-					"Winner answer content should match original")
+					"Winner answer content should match the original")
 				break
 			}
 		}
-		assert.True(t, winnerFound, "Winner should be one of the original candidate answers")
+		assert.True(t, winnerFound, "The winner should be one of the original candidate answers")
 
-		// Verify the winner has the highest score among judge summaries.
-		// Since we're using max pooling, the winner should correspond to the highest individual score.
+		// Verify that the winner has the highest score among the judge summaries.
+		// Since we are using max pooling, the winner should correspond to the highest individual score.
 		maxScore := 0.0
 		for _, summary := range judgeSummaries {
 			if summary.Score > maxScore {
@@ -125,7 +128,7 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 			}
 		}
 		assert.Equal(t, maxScore, verdict.AggregateScore,
-			"Aggregate score should equal the highest individual score for max pooling")
+			"The aggregate score should equal the highest individual score for max pooling")
 	})
 
 	t.Run("pipeline handles edge cases", func(t *testing.T) {
@@ -133,7 +136,7 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 		shortState := domain.NewState()
 		shortState = domain.With(shortState, domain.KeyQuestion, "Why?")
 
-		// Pipeline should still work with short inputs.
+		// The pipeline should still work with short inputs.
 		stateAfterAnswers, err := answererUnit.Execute(ctx, shortState)
 		require.NoError(t, err)
 
@@ -143,30 +146,30 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 		finalState, err := maxPoolUnit.Execute(ctx, stateAfterScores)
 		require.NoError(t, err)
 
-		// Verify final verdict exists.
+		// Verify that a final verdict exists.
 		_, ok := domain.Get(finalState, domain.KeyVerdict)
-		assert.True(t, ok, "Should produce verdict even for short questions")
+		assert.True(t, ok, "Should produce a verdict even for short questions")
 	})
 
 	t.Run("pipeline maintains state immutability", func(t *testing.T) {
-		// Test that original state is not modified.
+		// Test that the original state is not modified.
 		originalState := domain.NewState()
 		originalState = domain.With(originalState, domain.KeyQuestion, "Test question")
 
-		// Store original keys for comparison.
+		// Store the original keys for comparison.
 		originalKeys := originalState.Keys()
 
-		// Execute pipeline.
+		// Execute the pipeline.
 		stateAfterAnswers, err := answererUnit.Execute(ctx, originalState)
 		require.NoError(t, err)
 
-		// Verify original state is unchanged.
+		// Verify that the original state is unchanged.
 		newOriginalKeys := originalState.Keys()
-		assert.Equal(t, originalKeys, newOriginalKeys, "Original state should be immutable")
+		assert.Equal(t, originalKeys, newOriginalKeys, "The original state should be immutable")
 
-		// Verify new state has additional data.
+		// Verify that the new state has additional data.
 		newKeys := stateAfterAnswers.Keys()
-		assert.Greater(t, len(newKeys), len(originalKeys), "New state should have additional keys")
+		assert.Greater(t, len(newKeys), len(originalKeys), "The new state should have additional keys")
 	})
 }
 
@@ -174,14 +177,14 @@ func TestEndToEndEvaluationPipeline(t *testing.T) {
 func TestUnitRegistryIntegration(t *testing.T) {
 	ctx := context.Background()
 
-	// Create registry with mock LLM client.
+	// Create a registry with a mock LLM client.
 	mockLLMClient := testutils.NewMockLLMClient("mock-model-v1")
 	registry := NewDefaultUnitRegistry(mockLLMClient)
 
 	t.Run("registry supports new unit types", func(t *testing.T) {
 		supportedTypes := registry.GetSupportedTypes()
 
-		// Verify new unit types are supported.
+		// Verify that the new unit types are supported.
 		assert.Contains(t, supportedTypes, "answerer", "Registry should support answerer units")
 		assert.Contains(t, supportedTypes, "score_judge", "Registry should support score judge units")
 		assert.Contains(t, supportedTypes, "max_pool", "Registry should support max pool units")
@@ -232,7 +235,7 @@ func TestUnitRegistryIntegration(t *testing.T) {
 	})
 
 	t.Run("creates units through registry and executes pipeline", func(t *testing.T) {
-		// Create units through registry.
+		// Create units through the registry.
 		answerer, err := registry.CreateUnit("answerer", "pipeline_answerer", map[string]any{
 			"num_answers":     2,
 			"prompt":          "Provide answer to: %s",
@@ -258,7 +261,7 @@ func TestUnitRegistryIntegration(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// Execute mini-pipeline.
+		// Execute a mini-pipeline.
 		state := domain.NewState()
 		state = domain.With(state, domain.KeyQuestion, "What is the best programming language?")
 
@@ -271,25 +274,25 @@ func TestUnitRegistryIntegration(t *testing.T) {
 		state, err = aggregator.Execute(ctx, state)
 		require.NoError(t, err)
 
-		// Verify pipeline completed successfully.
+		// Verify that the pipeline completed successfully.
 		_, ok := domain.Get(state, domain.KeyVerdict)
 		assert.True(t, ok, "Pipeline should produce a verdict")
 	})
 
 	t.Run("handles unit creation errors gracefully", func(t *testing.T) {
-		// Test unsupported unit type.
+		// Test with an unsupported unit type.
 		_, err := registry.CreateUnit("unsupported_type", "test_id", map[string]any{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported unit type")
 
-		// Test empty unit ID.
+		// Test with an empty unit ID.
 		_, err = registry.CreateUnit("answerer", "", map[string]any{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unit ID cannot be empty")
 
-		// Test invalid configuration.
+		// Test with an invalid configuration.
 		_, err = registry.CreateUnit("answerer", "test_id", map[string]any{
-			"num_answers": -1, // Invalid value
+			"num_answers": -1, // Invalid value.
 		})
 		require.Error(t, err)
 	})
@@ -307,7 +310,7 @@ func TestDeterministicBehavior(t *testing.T) {
 	prompt := "Generate a comprehensive response"
 	options := map[string]any{"temperature": 0.5}
 
-	// Execute same prompt multiple times.
+	// Execute the same prompt multiple times.
 	result1, err1 := client1.Complete(ctx, prompt, options)
 	result2, err2 := client2.Complete(ctx, prompt, options)
 	result3, err3 := client1.Complete(ctx, prompt, options)
@@ -317,10 +320,10 @@ func TestDeterministicBehavior(t *testing.T) {
 	require.NoError(t, err3)
 
 	// Verify deterministic behavior.
-	assert.Equal(t, result1, result2, "Different client instances should produce same result")
-	assert.Equal(t, result1, result3, "Same client should produce same result for same input")
+	assert.Equal(t, result1, result2, "Different client instances should produce the same result")
+	assert.Equal(t, result1, result3, "The same client should produce the same result for the same input")
 
-	// Verify token estimates are consistent.
+	// Verify that token estimates are consistent.
 	tokens1, _ := client1.EstimateTokens("test text")
 	tokens2, _ := client2.EstimateTokens("test text")
 	assert.Equal(t, tokens1, tokens2, "Token estimates should be consistent")

@@ -1,3 +1,5 @@
+// Package application provides the core business logic and orchestration for
+// the evaluation engine.
 package application
 
 import (
@@ -8,6 +10,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// TestGraphConfig_UnmarshalYAML tests the YAML unmarshaling of GraphConfig.
+// It verifies that valid YAML configurations are correctly parsed and that
+// malformed or incomplete YAML structures are handled appropriately.
+// This test focuses on the unmarshaling process itself, not semantic validation.
 func TestGraphConfig_UnmarshalYAML(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -94,7 +100,9 @@ graph:
 				assert.Len(t, config.Graph.Edges, 1)
 			},
 		},
-		// Note: These tests would fail with validation, but YAML unmarshal alone doesn't validate
+		// Note: The following tests are commented out because YAML unmarshaling alone
+		// does not perform semantic validation (e.g., checking for required fields).
+		// This validation is handled separately by the application's validator.
 		// {
 		// 	name: "missing version",
 		// 	yaml: `
@@ -212,6 +220,10 @@ graph:
 	}
 }
 
+// TestUnitConfig_ParameterDecoding tests the decoding of the 'parameters' field
+// in a UnitConfig. It verifies that the flexible yaml.Node type can be
+// successfully unmarshaled into a structured map for different unit types,
+// allowing for varied and nested parameter configurations.
 func TestUnitConfig_ParameterDecoding(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -304,6 +316,9 @@ parameters:
 	}
 }
 
+// TestBudgetConfig_Validation tests the creation of BudgetConfig structs.
+// It ensures that the struct can be instantiated with both zero and valid values,
+// which is a prerequisite for the semantic validation that occurs later.
 func TestBudgetConfig_Validation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -335,8 +350,9 @@ func TestBudgetConfig_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// This would be validated by the validator
-			// For now, just check the struct can be created
+			// This test only verifies that the struct can be created.
+			// Full semantic validation (e.g., checking for negative values)
+			// is handled by a dedicated validator.
 			assert.NotNil(t, tt.budget)
 		})
 	}
