@@ -1,16 +1,29 @@
+// Package llm provides a unified interface for interacting with various Large
+// Language Models (LLMs).
+// It abstracts provider-specific details, offering a consistent API for
+// features like text generation, request management, and error handling.
+// This package also includes middleware support for implementing cross-cutting
+// concerns such as caching, rate limiting, and metrics.
 package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"google.golang.org/api/googleapi"
 	"google.golang.org/genai"
 )
 
-// Google provider constants
+// Google provider constants define model names and other provider-specific
+// values.
 const (
-	// GoogleDefaultModel is the default Google model (Gemini 2.0 Flash)
+	// GoogleDefaultModel is the default model for the Google provider.
+	// It is currently set to Gemini 2.0 Flash.
 	GoogleDefaultModel = "gemini-2.0-flash-exp"
 )
 
@@ -19,19 +32,23 @@ func init() {
 }
 
 // googleProvider implements the CoreLLM interface for Google's Gemini API.
-// This provider handles Google-specific authentication and request formatting
-// while providing a consistent interface for the middleware system.
+// It handles Google-specific authentication, request formatting, and error
+// handling, while conforming to the common interface for middleware
+// compatibility.
 type googleProvider struct {
-	client *genai.Client
-	model  string
+	BaseProvider
+	client          *genai.Client
+	tokenCounter    *TokenCounter
+	errorClassifier *ErrorClassifier
 }
 
 // newGoogleProvider creates a new Google Gemini provider instance.
-// This factory function configures the provider for Google's Gemini API
-// supporting both API key and service account authentication.
+// This factory function configures the provider with the necessary client and
+// authenticates using the provided configuration.
+// It returns an error if the required configuration is missing or invalid.
 func newGoogleProvider(config ClientConfig) (CoreLLM, error) {
 	if config.APIKey == "" {
-		return nil, fmt.Errorf("google API key or credentials path cannot be empty")
+		return nil, ErrEmptyAPIKey
 	}
 
 	model := config.Model
@@ -43,61 +60,55 @@ func newGoogleProvider(config ClientConfig) (CoreLLM, error) {
 	var client *genai.Client
 	var err error
 
-	// For simplicity, we'll primarily use API key authentication
-	// In production, service account authentication would require additional
-	// configuration like project ID and location for Vertex AI
-	if isFilePath(config.APIKey) {
-		// For file-based authentication, we'd need project and location
-		// For now, we'll return an error suggesting API key usage
-		return nil, fmt.Errorf("file-based authentication requires additional configuration (project, location). Please use API key authentication")
-	} else {
-		// API key authentication
-		client, err = genai.NewClient(ctx, &genai.ClientConfig{
-			APIKey:  config.APIKey,
-			Backend: genai.BackendGeminiAPI,
-		})
+	// Configure authentication using the provided API key or service account.
+	authConfig, err := buildAuthConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to configure authentication: %w", err)
 	}
 
+	client, err = genai.NewClient(ctx, authConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Google client: %w", err)
 	}
 
 	return &googleProvider{
-		client: client,
-		model:  model,
+		BaseProvider:    BaseProvider{model: model},
+		client:          client,
+		tokenCounter:    NewTokenCounter(),
+		errorClassifier: &ErrorClassifier{Provider: "google"},
 	}, nil
 }
 
-// DoRequest sends a request to Google's Gemini API and returns the response.
-// This method handles Google-specific request formatting, authentication,
-// and response parsing while maintaining token usage tracking.
+// DoRequest sends a request to the Google Gemini API and returns the response.
+// It formats the request, handles authentication, and parses the response,
+// while also tracking token usage.
+// This method returns the generated content, token counts, and any errors
+// that occurred.
 func (p *googleProvider) DoRequest(ctx context.Context, prompt string, opts map[string]any) (string, int, int, error) {
-	// Build the request from prompt and options
-	req := p.buildGenerateContentRequest(prompt, opts)
+	options := ParseRequestOptions(opts, p.model)
 
-	// Build generation config from options
-	config := p.buildGenerationConfig(opts)
+	req := p.buildGenerateContentRequest(prompt, options)
+	config := p.buildGenerationConfig(options)
 
-	// Make API call
-	resp, err := p.client.Models.GenerateContent(ctx, p.model, req, config)
+	resp, err := p.client.Models.GenerateContent(ctx, options.Model, req, config)
 	if err != nil {
-		return "", 0, 0, p.handleGeminiError(err)
+		return "", 0, 0, p.handleError(err)
 	}
 
-	// Extract response text using the convenience method
 	content := resp.Text()
 	if content == "" {
-		return "", 0, 0, fmt.Errorf("empty response from Gemini")
+		return "", 0, 0, ErrEmptyResponse
 	}
 
-	// Extract token usage or use estimation
 	tokensIn := p.getTokenCount(resp.UsageMetadata, true, prompt)
 	tokensOut := p.getTokenCount(resp.UsageMetadata, false, content)
 
 	return content, tokensIn, tokensOut, nil
 }
 
-// getTokenCount returns the actual token count from API or falls back to estimation
+// getTokenCount retrieves the token count from the API response metadata.
+// If the token count is not available in the metadata, it falls back to
+// estimating the tokens based on the text content.
 func (p *googleProvider) getTokenCount(usage *genai.GenerateContentResponseUsageMetadata, isInput bool, text string) int {
 	if usage != nil {
 		if isInput && usage.PromptTokenCount > 0 {
@@ -107,114 +118,186 @@ func (p *googleProvider) getTokenCount(usage *genai.GenerateContentResponseUsage
 			return int(usage.CandidatesTokenCount)
 		}
 	}
-	return EstimateTokens(text)
+	// Fallback to estimation if usage metadata is not available.
+	return p.tokenCounter.EstimateTokens(text)
 }
 
-// GetModel returns the currently configured Gemini model name.
-func (p *googleProvider) GetModel() string { return p.model }
-
-// SetModel updates the Gemini model for subsequent requests.
-func (p *googleProvider) SetModel(m string) { p.model = m }
-
-// buildGenerateContentRequest creates a GenerateContentRequest from prompt and options.
-// This handles the mapping from the simple string prompt interface to Gemini's structured format.
-func (p *googleProvider) buildGenerateContentRequest(prompt string, opts map[string]any) []*genai.Content {
-	// Handle system prompt by prepending to user prompt (Gemini doesn't have separate system role)
+// buildGenerateContentRequest creates the content for a Google Gemini API
+// request.
+// It prepends the system prompt to the user prompt, as Google's API does not
+// have a separate system role.
+func (p *googleProvider) buildGenerateContentRequest(prompt string, options RequestOptions) []*genai.Content {
 	finalPrompt := prompt
-	if systemPrompt := ExtractOptionalString(opts, "system_prompt", "", IsNonEmptyString); systemPrompt != "" {
-		finalPrompt = systemPrompt + "\n\n" + prompt
+	if options.System != "" {
+		// Prepend the system prompt to the user prompt in a structured format.
+		finalPrompt = fmt.Sprintf("System: %s\n\nUser: %s", options.System, prompt)
 	}
 
-	// Create content with final prompt
-	content := []*genai.Content{
+	return []*genai.Content{
 		genai.NewContentFromText(finalPrompt, genai.RoleUser),
 	}
-
-	return content
 }
 
-// buildGenerationConfig creates a GenerateContentConfig from options.
-// This handles the mapping of common parameters to Gemini's configuration format.
-func (p *googleProvider) buildGenerationConfig(opts map[string]any) *genai.GenerateContentConfig {
+// buildGenerationConfig creates the generation configuration for a Google
+// Gemini API request.
+// It validates and sets parameters such as temperature, max tokens, and top P.
+func (p *googleProvider) buildGenerationConfig(options RequestOptions) *genai.GenerateContentConfig {
 	config := &genai.GenerateContentConfig{}
 
-	// Temperature (0.0 to 2.0) - Gemini supports higher temperatures than Anthropic
-	if temp := ExtractOptionalFloat64(opts, "temperature", -1, IsValidGeminiTemperature); temp != -1 {
+	if options.Temperature != nil {
+		// Clamp temperature to the supported range of 0.0 to 2.0 for Gemini.
+		temp := clamp(*options.Temperature, 0.0, 2.0)
 		config.Temperature = genai.Ptr(float32(temp))
 	}
 
-	// MaxOutputTokens - only set if explicitly provided (Google provider doesn't use DefaultMaxTokens)
-	if maxTokens := ExtractOptionalInt(opts, "max_tokens", 0, IsPositiveInt); maxTokens > 0 {
-		config.MaxOutputTokens = int32(maxTokens) // #nosec G115 - maxTokens is validated positive and within reasonable bounds
+	if options.MaxTokens > 0 {
+		// Safely convert max tokens to int32, respecting the maximum value.
+		if options.MaxTokens > math.MaxInt32 {
+			config.MaxOutputTokens = math.MaxInt32
+		} else {
+			config.MaxOutputTokens = int32(options.MaxTokens)
+		}
 	}
 
-	// TopP (0.0 to 1.0)
-	if topP := ExtractOptionalFloat64(opts, "top_p", -1, IsValidTopP); topP != -1 {
+	if options.TopP != nil {
+		topP := clamp(*options.TopP, 0.0, 1.0)
 		config.TopP = genai.Ptr(float32(topP))
 	}
 
-	// TopK (1 to 40) - Gemini-specific parameter
-	if topK := ExtractOptionalInt(opts, "top_k", -1, IsValidGeminiTopK); topK != -1 {
+	if topK, ok := options.Extra["top_k"].(int); ok {
+		// Clamp top K to the Gemini-specific supported range of 1 to 40.
+		topK = clampInt(topK, 1, 40)
 		config.TopK = genai.Ptr(float32(topK))
 	}
 
 	return config
 }
 
-// handleGeminiError converts Gemini-specific errors to appropriate error types.
-// This provides better error handling and debugging information for the application.
-func (p *googleProvider) handleGeminiError(err error) error {
-	// Check for common error patterns in the error message
-	errorMsg := err.Error()
-
-	// Authentication errors
-	if strings.Contains(errorMsg, "401") || strings.Contains(errorMsg, "Unauthorized") ||
-		strings.Contains(errorMsg, "API key") || strings.Contains(errorMsg, "authentication") {
-		return fmt.Errorf("gemini authentication failed: check API key or credentials: %w", err)
+// handleError provides structured error handling for Google API responses.
+// It classifies errors based on their type, such as context errors or API
+// errors, and returns a standardized ProviderError.
+func (p *googleProvider) handleError(err error) error {
+	if isContextError(err) {
+		return p.errorClassifier.ClassifyContextError(err)
 	}
 
-	// Rate limiting errors
-	if strings.Contains(errorMsg, "429") || strings.Contains(errorMsg, "quota") ||
-		strings.Contains(errorMsg, "rate limit") {
-		return fmt.Errorf("gemini rate limit exceeded: %w", err)
+	if apiErr, ok := err.(*googleapi.Error); ok {
+		message := apiErr.Message
+		if message == "" && len(apiErr.Errors) > 0 {
+			message = apiErr.Errors[0].Message
+		}
+
+		// Provide special handling for content policy violations to return a
+		// clear error.
+		if containsContentPolicyError(apiErr) {
+			return NewProviderError("google", ErrorTypeContentPolicy, apiErr.Code,
+				"request blocked by safety filters", err)
+		}
+
+		return p.errorClassifier.ClassifyHTTPError(apiErr.Code, message, err)
 	}
 
-	// Model not found errors
-	if strings.Contains(errorMsg, "404") || strings.Contains(errorMsg, "model") &&
-		strings.Contains(errorMsg, "not found") {
-		return fmt.Errorf("gemini model '%s' not found or not accessible: %w", p.model, err)
-	}
-
-	// Server errors
-	if strings.Contains(errorMsg, "500") || strings.Contains(errorMsg, "502") ||
-		strings.Contains(errorMsg, "503") || strings.Contains(errorMsg, "504") {
-		return fmt.Errorf("gemini server error: %w", err)
-	}
-
-	// Content policy violations
-	if strings.Contains(errorMsg, "content") && (strings.Contains(errorMsg, "policy") ||
-		strings.Contains(errorMsg, "safety") || strings.Contains(errorMsg, "blocked")) {
-		return fmt.Errorf("gemini content policy violation: request blocked by safety filters: %w", err)
-	}
-
-	// Generic network/timeout errors
-	if strings.Contains(errorMsg, "timeout") || strings.Contains(errorMsg, "connection") {
-		return fmt.Errorf("gemini network error: %w", err)
-	}
-
-	// Default case: wrap the original error with context
-	return fmt.Errorf("gemini API request failed: %w", err)
+	return NewProviderError("google", ErrorTypeUnknown, 0, "request failed", err)
 }
 
-// isFilePath checks if the provided string looks like a file path.
-// This helps determine whether to use API key or service account authentication.
-func isFilePath(s string) bool {
-	// Check if it contains path separators or file extensions
-	return strings.Contains(s, "/") || strings.Contains(s, "\\") || strings.Contains(s, ".json")
+// buildAuthConfig creates the appropriate authentication configuration based on
+// the client settings.
+// It supports both API key and service account authentication.
+func buildAuthConfig(config ClientConfig) (*genai.ClientConfig, error) {
+	if looksLikeFilePath(config.APIKey) {
+		// Ensure the credentials file exists before proceeding.
+		if !fileExists(config.APIKey) {
+			return nil, fmt.Errorf("credentials file not found: %s", config.APIKey)
+		}
+
+		// For production environments, service account authentication should be
+		// fully implemented.
+		// This implementation provides a clear error message for guidance.
+		return nil, fmt.Errorf("service account authentication requires additional configuration. " +
+			"Please use API key authentication or set GOOGLE_APPLICATION_CREDENTIALS environment variable")
+	}
+
+	return &genai.ClientConfig{
+		APIKey:  config.APIKey,
+		Backend: genai.BackendGeminiAPI,
+	}, nil
 }
 
-// IsValidGeminiTopK returns true if the integer is a valid Gemini top_k value (1 to 40).
-func IsValidGeminiTopK(val int) bool { return val >= 1 && val <= 40 }
+// looksLikeFilePath checks if a string appears to be a file path.
+// It performs checks for absolute paths, relative paths, and common credential
+// file extensions.
+func looksLikeFilePath(s string) bool {
+	if filepath.IsAbs(s) {
+		return true
+	}
 
-// IsValidGeminiTemperature returns true if the float is a valid Gemini temperature (0.0 to 2.0).
-func IsValidGeminiTemperature(val float64) bool { return val >= 0.0 && val <= 2.0 }
+	if strings.Contains(s, "/") || strings.Contains(s, "\\") {
+		return true
+	}
+
+	lower := strings.ToLower(s)
+	if strings.HasSuffix(lower, ".json") ||
+		strings.HasSuffix(lower, ".p12") ||
+		strings.HasSuffix(lower, ".pem") ||
+		strings.Contains(lower, "credentials") {
+		return true
+	}
+
+	return false
+}
+
+// fileExists checks if a file exists at the given path.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// isContextError checks if an error is a context-related error, such as a
+// deadline exceeded or cancellation.
+func isContextError(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled)
+}
+
+// containsContentPolicyError checks if a Google API error is related to
+// content policy violations.
+func containsContentPolicyError(apiErr *googleapi.Error) bool {
+	if apiErr.Message != "" {
+		lower := strings.ToLower(apiErr.Message)
+		if strings.Contains(lower, "safety") ||
+			strings.Contains(lower, "policy") ||
+			strings.Contains(lower, "blocked") {
+			return true
+		}
+	}
+
+	for _, e := range apiErr.Errors {
+		if e.Reason == "SAFETY" || e.Reason == "BLOCKED" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// clamp restricts a float64 value to a specified range.
+func clamp(val, min, max float64) float64 {
+	if val < min {
+		return min
+	}
+	if val > max {
+		return max
+	}
+	return val
+}
+
+// clampInt restricts an integer value to a specified range.
+func clampInt(val, min, max int) int {
+	if val < min {
+		return min
+	}
+	if val > max {
+		return max
+	}
+	return val
+}

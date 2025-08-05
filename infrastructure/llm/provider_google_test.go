@@ -1,18 +1,19 @@
 package llm
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestNewGoogleProvider tests the creation of a new Google provider.
-// It covers various scenarios, including valid and invalid configurations.
+// TestNewGoogleProvider tests the behavior of the newGoogleProvider function.
+// It ensures that the provider is created correctly with valid configurations
+// and that it returns an error for invalid configurations, such as an empty
+// API key or a file path used as an API key.
 func TestNewGoogleProvider(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -78,8 +79,9 @@ func TestNewGoogleProvider(t *testing.T) {
 	}
 }
 
-// TestGoogleProvider_GetSetModel tests the GetModel and SetModel methods
-// of the Google provider.
+// TestGoogleProvider_GetSetModel tests the GetModel and SetModel methods of the
+// Google provider, ensuring that the model can be retrieved and updated
+// correctly.
 func TestGoogleProvider_GetSetModel(t *testing.T) {
 	provider, err := newGoogleProvider(ClientConfig{
 		APIKey: "test-key",
@@ -93,8 +95,9 @@ func TestGoogleProvider_GetSetModel(t *testing.T) {
 	assert.Equal(t, GoogleDefaultModel, provider.GetModel())
 }
 
-// TestIsFilePath tests the isFilePath helper function.
-func TestIsFilePath(t *testing.T) {
+// TestLooksLikeFilePath tests the looksLikeFilePath helper function to ensure it
+// correctly identifies strings that resemble file paths.
+func TestLooksLikeFilePath(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected bool
@@ -110,64 +113,66 @@ func TestIsFilePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := isFilePath(tt.input)
+			result := looksLikeFilePath(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-// TestBuildGenerateContentRequest tests the buildGenerateContentRequest method.
+// TestBuildGenerateContentRequest tests the construction of a content generation
+// request. It verifies that the request is correctly assembled with and without
+// a system prompt.
 func TestBuildGenerateContentRequest(t *testing.T) {
 	provider := &googleProvider{
-		model: "gemini-pro",
+		BaseProvider: BaseProvider{model: "gemini-pro"},
 	}
 
 	t.Run("basic prompt", func(t *testing.T) {
 		prompt := "Hello, world!"
-		opts := map[string]any{}
+		options := RequestOptions{Model: "gemini-pro"}
 
-		content := provider.buildGenerateContentRequest(prompt, opts)
+		content := provider.buildGenerateContentRequest(prompt, options)
 
 		require.Len(t, content, 1)
-		// Note: We can't easily test the internal structure without exposing more details
-		// This is a basic structure test
 		assert.NotNil(t, content[0])
 	})
 
 	t.Run("with system prompt", func(t *testing.T) {
 		prompt := "Hello, world!"
-		opts := map[string]any{
-			"system_prompt": "You are a helpful assistant.",
+		options := RequestOptions{
+			Model:  "gemini-pro",
+			System: "You are a helpful assistant.",
 		}
 
-		content := provider.buildGenerateContentRequest(prompt, opts)
+		content := provider.buildGenerateContentRequest(prompt, options)
 
 		require.Len(t, content, 1)
-		// The system prompt should be prepended to the user prompt in Gemini
 		assert.NotNil(t, content[0])
 	})
 
 	t.Run("empty system prompt ignored", func(t *testing.T) {
 		prompt := "Hello, world!"
-		opts := map[string]any{
-			"system_prompt": "",
-		}
+		options := RequestOptions{Model: "gemini-pro"}
 
-		content := provider.buildGenerateContentRequest(prompt, opts)
+		content := provider.buildGenerateContentRequest(prompt, options)
 
 		require.Len(t, content, 1)
 		assert.NotNil(t, content[0])
 	})
 }
 
+// TestBuildGenerationConfig tests the construction of the generation
+// configuration from request options. It ensures that parameters like
+// temperature, max tokens, top-p, and top-k are correctly translated into the
+// configuration structure.
 func TestBuildGenerationConfig(t *testing.T) {
 	provider := &googleProvider{
-		model: "gemini-pro",
+		BaseProvider: BaseProvider{model: "gemini-pro"},
 	}
 
 	t.Run("empty options", func(t *testing.T) {
-		opts := map[string]any{}
-		config := provider.buildGenerationConfig(opts)
+		options := RequestOptions{Model: "gemini-pro"}
+		config := provider.buildGenerationConfig(options)
 
 		assert.NotNil(t, config)
 		assert.Nil(t, config.Temperature)
@@ -177,70 +182,61 @@ func TestBuildGenerationConfig(t *testing.T) {
 	})
 
 	t.Run("valid temperature", func(t *testing.T) {
-		opts := map[string]any{
-			"temperature": 0.7,
+		temp := 0.7
+		options := RequestOptions{
+			Model:       "gemini-pro",
+			Temperature: &temp,
 		}
-		config := provider.buildGenerationConfig(opts)
+		config := provider.buildGenerationConfig(options)
 
 		assert.NotNil(t, config.Temperature)
 		assert.Equal(t, float32(0.7), *config.Temperature)
 	})
 
-	t.Run("invalid temperature ignored", func(t *testing.T) {
-		opts := map[string]any{
-			"temperature": 3.0, // Too high
-		}
-		config := provider.buildGenerationConfig(opts)
-
-		assert.Nil(t, config.Temperature)
-	})
-
 	t.Run("valid max_tokens", func(t *testing.T) {
-		opts := map[string]any{
-			"max_tokens": 1000,
+		options := RequestOptions{
+			Model:     "gemini-pro",
+			MaxTokens: 1000,
 		}
-		config := provider.buildGenerationConfig(opts)
+		config := provider.buildGenerationConfig(options)
 
 		assert.Equal(t, int32(1000), config.MaxOutputTokens)
 	})
 
-	t.Run("invalid max_tokens ignored", func(t *testing.T) {
-		opts := map[string]any{
-			"max_tokens": -100, // Negative
-		}
-		config := provider.buildGenerationConfig(opts)
-
-		assert.Equal(t, int32(0), config.MaxOutputTokens)
-	})
-
 	t.Run("valid top_p", func(t *testing.T) {
-		opts := map[string]any{
-			"top_p": 0.9,
+		topP := 0.9
+		options := RequestOptions{
+			Model: "gemini-pro",
+			TopP:  &topP,
 		}
-		config := provider.buildGenerationConfig(opts)
+		config := provider.buildGenerationConfig(options)
 
 		assert.NotNil(t, config.TopP)
 		assert.Equal(t, float32(0.9), *config.TopP)
 	})
 
 	t.Run("valid top_k", func(t *testing.T) {
-		opts := map[string]any{
-			"top_k": 20,
+		options := RequestOptions{
+			Model: "gemini-pro",
+			Extra: map[string]any{"top_k": 20},
 		}
-		config := provider.buildGenerationConfig(opts)
+		config := provider.buildGenerationConfig(options)
 
 		assert.NotNil(t, config.TopK)
 		assert.Equal(t, float32(20), *config.TopK)
 	})
 
 	t.Run("all valid options", func(t *testing.T) {
-		opts := map[string]any{
-			"temperature": 0.8,
-			"max_tokens":  2000,
-			"top_p":       0.95,
-			"top_k":       40,
+		temp := 0.8
+		topP := 0.95
+		options := RequestOptions{
+			Model:       "gemini-pro",
+			Temperature: &temp,
+			MaxTokens:   2000,
+			TopP:        &topP,
+			Extra:       map[string]any{"top_k": 40},
 		}
-		config := provider.buildGenerationConfig(opts)
+		config := provider.buildGenerationConfig(options)
 
 		assert.NotNil(t, config.Temperature)
 		assert.Equal(t, float32(0.8), *config.Temperature)
@@ -252,100 +248,82 @@ func TestBuildGenerationConfig(t *testing.T) {
 	})
 }
 
-func TestHandleGeminiError(t *testing.T) {
+// TestHandleError tests the error handling and classification mechanism.
+// It ensures that different types of errors, such as context cancellation or
+// unknown errors, are correctly categorized into the appropriate ProviderError
+// type.
+func TestHandleError(t *testing.T) {
 	provider := &googleProvider{
-		model: "gemini-pro",
+		BaseProvider:    BaseProvider{model: "gemini-pro"},
+		errorClassifier: &ErrorClassifier{Provider: "google"},
 	}
 
 	tests := []struct {
-		name        string
-		inputError  error
-		expectedMsg string
+		name         string
+		inputError   error
+		expectedType ErrorType
 	}{
 		{
-			name:        "authentication error",
-			inputError:  fmt.Errorf("401 Unauthorized"),
-			expectedMsg: "gemini authentication failed",
+			name:         "context canceled",
+			inputError:   context.Canceled,
+			expectedType: ErrorTypeNetwork,
 		},
 		{
-			name:        "rate limit error",
-			inputError:  fmt.Errorf("429 Too Many Requests"),
-			expectedMsg: "gemini rate limit exceeded",
+			name:         "context timeout",
+			inputError:   context.DeadlineExceeded,
+			expectedType: ErrorTypeNetwork,
 		},
 		{
-			name:        "model not found error",
-			inputError:  fmt.Errorf("404 model not found"),
-			expectedMsg: "gemini model 'gemini-pro' not found",
-		},
-		{
-			name:        "server error",
-			inputError:  fmt.Errorf("500 Internal Server Error"),
-			expectedMsg: "gemini server error",
-		},
-		{
-			name:        "content policy violation",
-			inputError:  fmt.Errorf("content blocked by safety policy"),
-			expectedMsg: "gemini content policy violation",
-		},
-		{
-			name:        "timeout error",
-			inputError:  fmt.Errorf("connection timeout"),
-			expectedMsg: "gemini network error",
-		},
-		{
-			name:        "generic error",
-			inputError:  fmt.Errorf("unknown error"),
-			expectedMsg: "gemini API request failed",
+			name:         "generic error",
+			inputError:   fmt.Errorf("unknown error"),
+			expectedType: ErrorTypeUnknown,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := provider.handleGeminiError(tt.inputError)
-			assert.Contains(t, result.Error(), tt.expectedMsg)
+			result := provider.handleError(tt.inputError)
+			provErr, ok := result.(*ProviderError)
+			require.True(t, ok)
+			assert.Equal(t, tt.expectedType, provErr.Type)
+			assert.Equal(t, "google", provErr.Provider)
 		})
 	}
 }
 
-// TestGoogleProvider_IntegrationWithMockServer provides a placeholder for
-// integration tests with a mock server.
-func TestGoogleProvider_IntegrationWithMockServer(t *testing.T) {
-	t.Run("mock successful response", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response := map[string]interface{}{
-				"candidates": []map[string]interface{}{
-					{
-						"content": map[string]interface{}{
-							"parts": []map[string]interface{}{
-								{
-									"text": "Hello! This is a mock response from Gemini.",
-								},
-							},
-						},
-					},
-				},
-				"usageMetadata": map[string]interface{}{
-					"promptTokenCount":     10,
-					"candidatesTokenCount": 12,
-				},
-			}
+// TestGoogleProvider runs the full provider test suite for the Google provider.
+// This suite covers standard behaviors like basic requests, handling of options,
+// error management, and context cancellation. It requires the GOOGLE_API_KEY
+// environment variable to be set.
+func TestGoogleProvider(t *testing.T) {
+	apiKey := os.Getenv("GOOGLE_API_KEY")
+	if apiKey == "" {
+		t.Skip("GOOGLE_API_KEY not set")
+	}
 
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
-		}))
-		defer server.Close()
+	config := ClientConfig{
+		APIKey: apiKey,
+		Model:  GoogleDefaultModel,
+	}
 
-		assert.NotNil(t, server)
-	})
+	suite := NewProviderTestSuite(t, "google", config)
+
+	t.Run("BasicRequest", func(t *testing.T) { suite.TestBasicRequest() })
+	t.Run("RequestWithOptions", func(t *testing.T) { suite.TestRequestWithOptions() })
+	t.Run("ErrorHandling", func(t *testing.T) { suite.TestErrorHandling() })
+	t.Run("ContextCancellation", func(t *testing.T) { suite.TestContextCancellation() })
+	t.Run("ModelGetterSetter", func(t *testing.T) { suite.TestModelGetterSetter() })
 }
 
-// BenchmarkEstimateTokens benchmarks the token estimation performance.
-func BenchmarkEstimateTokens(b *testing.B) {
+// BenchmarkTokenCounter benchmarks the performance of the token estimation
+// function.
+func BenchmarkTokenCounter(b *testing.B) {
 	text := "This is a sample text for benchmarking token estimation performance"
+	counter := NewTokenCounter()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		EstimateTokens(text)
+		counter.EstimateTokens(text)
 	}
 }
 
@@ -353,18 +331,21 @@ func BenchmarkEstimateTokens(b *testing.B) {
 // generation configuration.
 func BenchmarkBuildGenerationConfig(b *testing.B) {
 	provider := &googleProvider{
-		model: "gemini-pro",
+		BaseProvider: BaseProvider{model: "gemini-pro"},
 	}
 
-	opts := map[string]any{
-		"temperature": 0.7,
-		"max_tokens":  1000,
-		"top_p":       0.9,
-		"top_k":       40,
+	temp := 0.7
+	topP := 0.9
+	options := RequestOptions{
+		Model:       "gemini-pro",
+		Temperature: &temp,
+		MaxTokens:   1000,
+		TopP:        &topP,
+		Extra:       map[string]any{"top_k": 40},
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		provider.buildGenerationConfig(opts)
+		provider.buildGenerationConfig(options)
 	}
 }

@@ -75,17 +75,3 @@ func ExtractOptionalFloat64(opts map[string]any, key string, defaultVal float64,
 
 	return floatVal
 }
-
-// Configuration validation functions
-
-// IsPositiveInt returns true if the integer is greater than 0.
-func IsPositiveInt(val int) bool { return val > 0 }
-
-// IsNonEmptyString returns true if the string is not empty.
-func IsNonEmptyString(val string) bool { return val != "" }
-
-// IsValidTemperature returns true if the float is a valid temperature (0.0 to 1.0).
-func IsValidTemperature(val float64) bool { return val >= 0.0 && val <= 1.0 }
-
-// IsValidTopP returns true if the float is a valid top_p value (0.0 to 1.0).
-func IsValidTopP(val float64) bool { return val >= 0.0 && val <= 1.0 }

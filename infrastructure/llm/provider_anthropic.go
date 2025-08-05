@@ -1,3 +1,8 @@
+// Package llm provides a unified interface for interacting with various Large
+// Language Model (LLM) providers. It abstracts provider-specific details,
+// offering a consistent API for making requests, handling responses, and managing
+// configurations. This package is designed to be extensible, allowing new
+// providers to be added by implementing the CoreLLM interface.
 package llm
 
 import (
@@ -10,35 +15,34 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-// Anthropic provider constants
+// Anthropic provider constants define default values and identifiers.
 const (
-	// AnthropicDefaultModel is the default Anthropic model (Claude 3.5 Sonnet)
+	// AnthropicDefaultModel is the default model used for Anthropic API calls.
+	// It is currently set to Claude 3.5 Sonnet.
 	AnthropicDefaultModel = "claude-3-5-sonnet-20241022"
 )
 
 func init() {
+	// Registers the Anthropic provider with the central provider factory.
+	// This allows the factory to create instances of the Anthropic provider
+	// when requested by name.
 	RegisterProviderFactory("anthropic", newAnthropicProvider)
 }
 
-// anthropicProvider implements the CoreLLM interface for Anthropic's Claude API.
-// This provider handles Anthropic-specific request formatting and response parsing
-// while maintaining compatibility with the common middleware system.
+// AnthropicProvider implements the CoreLLM interface for Anthropic's Claude API.
+// It handles Anthropic-specific request formatting, response parsing, and error
+// handling, while conforming to the common interface for middleware
+// compatibility.
 type anthropicProvider struct {
-	client anthropic.Client
-	model  string
-}
-
-// requestConfig holds parsed request configuration
-type requestConfig struct {
-	maxTokens   int
-	model       string
-	temperature *float64
-	system      string
+	BaseProvider
+	client          anthropic.Client
+	tokenCounter    *TokenCounter
+	errorClassifier *ErrorClassifier
 }
 
 // newAnthropicProvider creates a new Anthropic provider instance.
-// This factory function configures the provider for Anthropic's API
-// and validates that required configuration is present.
+// This factory function configures the provider for Anthropic's API and
+// validates that the required configuration, such as the API key, is present.
 func newAnthropicProvider(config ClientConfig) (CoreLLM, error) {
 	if config.APIKey == "" {
 		return nil, fmt.Errorf("anthropic API key cannot be empty")
@@ -51,71 +55,69 @@ func newAnthropicProvider(config ClientConfig) (CoreLLM, error) {
 
 	opts := []option.RequestOption{option.WithAPIKey(config.APIKey)}
 	if config.BaseURL != "" {
-		opts = append(opts, option.WithBaseURL(config.BaseURL))
+		validatedURL, err := ValidateBaseURL(config.BaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid BaseURL: %w", err)
+		}
+		opts = append(opts, option.WithBaseURL(validatedURL))
 	}
 
 	client := anthropic.NewClient(opts...)
 
 	return &anthropicProvider{
-		client: client,
-		model:  model,
+		BaseProvider:    BaseProvider{model: model},
+		client:          client,
+		tokenCounter:    NewTokenCounter(),
+		errorClassifier: &ErrorClassifier{Provider: "anthropic"},
 	}, nil
 }
 
-// DoRequest sends a request to Anthropic's Claude API and returns the response.
-// This method handles Anthropic-specific request formatting, authentication,
-// and response parsing while tracking token usage.
+// DoRequest sends a request to the Anthropic API and returns the response.
+// This method formats the request, handles authentication, and parses the
+// response, while also tracking token usage for both the prompt and the
+// completion.
 func (p *anthropicProvider) DoRequest(ctx context.Context, prompt string, opts map[string]any) (string, int, int, error) {
-	config := p.parseRequestOptions(opts)
-	params := p.buildAnthropicParams(prompt, config)
+	options := ParseRequestOptions(opts, p.model)
+	params := p.buildAnthropicParams(prompt, options)
 
 	message, err := p.client.Messages.New(ctx, params)
 	if err != nil {
-		return "", 0, 0, p.wrapError(err)
+		return "", 0, 0, p.handleError(err)
 	}
 
 	return p.processResponse(message, prompt)
 }
 
-// parseRequestOptions extracts and validates request options with defaults
-func (p *anthropicProvider) parseRequestOptions(opts map[string]any) requestConfig {
-	config := requestConfig{
-		maxTokens: ExtractOptionalInt(opts, "max_tokens", DefaultMaxTokens, IsPositiveInt),
-		model:     ExtractOptionalString(opts, "model", p.model, IsNonEmptyString),
-		system:    ExtractOptionalString(opts, "system", "", nil), // Empty string is valid for system
-	}
-
-	if temp := ExtractOptionalFloat64(opts, "temperature", -1, IsValidTemperature); temp != -1 {
-		config.temperature = &temp
-	}
-
-	return config
-}
-
-// buildAnthropicParams creates the API request parameters
-func (p *anthropicProvider) buildAnthropicParams(prompt string, config requestConfig) anthropic.MessageNewParams {
+// buildAnthropicParams creates the API request parameters with proper validation.
+// It constructs the message list and sets model-specific options like
+// temperature and max tokens.
+func (p *anthropicProvider) buildAnthropicParams(prompt string, options RequestOptions) anthropic.MessageNewParams {
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(config.model),
-		MaxTokens: int64(config.maxTokens),
+		Model:     anthropic.Model(options.Model),
+		MaxTokens: int64(options.MaxTokens),
 		Messages:  messages,
 	}
 
-	if config.temperature != nil {
-		params.Temperature = anthropic.Float(*config.temperature)
+	// Anthropic's API requires the temperature to be between 0.0 and 1.0.
+	// This check ensures we only send a valid value.
+	if options.Temperature != nil && *options.Temperature >= 0.0 && *options.Temperature <= 1.0 {
+		params.Temperature = anthropic.Float(*options.Temperature)
 	}
 
-	if config.system != "" {
-		params.System = []anthropic.TextBlockParam{{Text: config.system}}
+	if options.System != "" {
+		params.System = []anthropic.TextBlockParam{{Text: options.System}}
 	}
 
 	return params
 }
 
-// processResponse extracts content and token counts from the API response
+// processResponse extracts the text content and token counts from the API
+// response. It handles cases where the response might be empty and ensures
+// consistent token counting.
 func (p *anthropicProvider) processResponse(message *anthropic.Message, originalPrompt string) (string, int, int, error) {
 	var responseText strings.Builder
 	for _, block := range message.Content {
@@ -136,45 +138,36 @@ func (p *anthropicProvider) processResponse(message *anthropic.Message, original
 	return responseStr, tokensIn, tokensOut, nil
 }
 
-// getTokenCount returns the actual token count from API or falls back to estimation
+// getTokenCount returns the token count from the API if available.
+// Otherwise, it falls back to a local estimation. This ensures token counts are
+// always populated, even if the API does not provide them.
 func (p *anthropicProvider) getTokenCount(apiTokens int64, text string) int {
 	if apiTokens > 0 {
 		return int(apiTokens)
 	}
-	return EstimateTokens(text)
+	return p.tokenCounter.EstimateTokens(text)
 }
 
-// wrapError wraps Anthropic SDK errors with additional context and more specific error types
-func (p *anthropicProvider) wrapError(err error) error {
+// handleError provides structured error handling for Anthropic API calls.
+// It classifies errors into standard categories, such as context-related
+// errors, HTTP status code errors, or unknown provider errors.
+func (p *anthropicProvider) handleError(err error) error {
+	// Check for context errors first, as they are common and should be
+	// handled specifically.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return p.errorClassifier.ClassifyContextError(err)
+	}
+
+	// Handle specific Anthropic SDK errors by inspecting the error type.
 	var anthropicErr *anthropic.Error
 	if errors.As(err, &anthropicErr) {
-		switch anthropicErr.StatusCode {
-		case 401:
-			return fmt.Errorf("anthropic authentication failed: check API key (%d): %w", anthropicErr.StatusCode, err)
-		case 429:
-			return fmt.Errorf("anthropic rate limit exceeded: %w", err)
-		case 400:
-			return fmt.Errorf("anthropic bad request: check parameters (%d): %w", anthropicErr.StatusCode, err)
-		case 500, 502, 503, 504:
-			return fmt.Errorf("anthropic server error (%d): %w", anthropicErr.StatusCode, err)
-		default:
-			return fmt.Errorf("anthropic API error (%d): %w", anthropicErr.StatusCode, err)
+		message := anthropicErr.Error()
+		if message == "" {
+			message = "unknown error"
 		}
+		return p.errorClassifier.ClassifyHTTPError(anthropicErr.StatusCode, message, err)
 	}
 
-	// Handle context errors specifically
-	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("anthropic request timeout: %w", err)
-	}
-	if errors.Is(err, context.Canceled) {
-		return fmt.Errorf("anthropic request canceled: %w", err)
-	}
-
-	return fmt.Errorf("anthropic request failed: %w", err)
+	// Fallback for any other type of error.
+	return NewProviderError("anthropic", ErrorTypeUnknown, 0, "request failed", err)
 }
-
-// GetModel returns the currently configured Anthropic model name.
-func (p *anthropicProvider) GetModel() string { return p.model }
-
-// SetModel updates the Anthropic model for subsequent requests.
-func (p *anthropicProvider) SetModel(m string) { p.model = m }

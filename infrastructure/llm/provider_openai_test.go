@@ -35,8 +35,8 @@ type mockOpenAIResponse struct {
 	} `json:"usage"`
 }
 
-// TestOpenAIProvider_DoRequest tests the DoRequest method of the OpenAI provider.
-// It covers basic successful requests and requests with options.
+// TestOpenAIProvider_DoRequest tests the DoRequest method for the OpenAI provider.
+// It verifies successful requests with and without optional parameters.
 func TestOpenAIProvider_DoRequest(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -96,9 +96,9 @@ func TestOpenAIProvider_DoRequest(t *testing.T) {
 			name:   "request_with_system_prompt",
 			prompt: "What's the weather like?",
 			opts: map[string]any{
-				"system_prompt": "You are a helpful weather assistant.",
-				"temperature":   float32(0.7),
-				"max_tokens":    100,
+				"system":      "You are a helpful weather assistant.",
+				"temperature": float32(0.7),
+				"max_tokens":  100,
 			},
 			mockResponse: mockOpenAIResponse{
 				ID:      "chatcmpl-test456",
@@ -144,23 +144,18 @@ func TestOpenAIProvider_DoRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock HTTP server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request method and path
 				assert.Equal(t, "POST", r.Method)
 				assert.Equal(t, "/v1/chat/completions", r.URL.Path)
 
-				// Verify authorization header
 				authHeader := r.Header.Get("Authorization")
 				assert.Contains(t, authHeader, "Bearer test-api-key")
 
-				// Return mock response
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(tt.mockResponse)
 			}))
 			defer server.Close()
 
-			// Create provider with mock server URL
 			config := ClientConfig{
 				APIKey:  "test-api-key",
 				Model:   "gpt-4",
@@ -170,7 +165,6 @@ func TestOpenAIProvider_DoRequest(t *testing.T) {
 			provider, err := newOpenAIProvider(config)
 			require.NoError(t, err)
 
-			// Make request
 			response, tokensIn, tokensOut, err := provider.DoRequest(context.Background(), tt.prompt, tt.opts)
 
 			if tt.expectError {
@@ -186,8 +180,8 @@ func TestOpenAIProvider_DoRequest(t *testing.T) {
 	}
 }
 
-// TestOpenAIProvider_ErrorHandling tests the error handling of the OpenAI provider.
-// It covers various error scenarios, such as authentication and rate limiting.
+// TestOpenAIProvider_ErrorHandling tests the error handling capabilities of the OpenAI provider.
+// It ensures that API errors, such as authentication and rate limiting, are handled correctly.
 func TestOpenAIProvider_ErrorHandling(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -205,7 +199,7 @@ func TestOpenAIProvider_ErrorHandling(t *testing.T) {
 					"code": "invalid_api_key"
 				}
 			}`,
-			expectedErrMsg: "authentication failed - check API key",
+			expectedErrMsg: "authentication failed",
 		},
 		{
 			name:       "rate_limit_error",
@@ -217,7 +211,7 @@ func TestOpenAIProvider_ErrorHandling(t *testing.T) {
 					"code": "rate_limit_exceeded"
 				}
 			}`,
-			expectedErrMsg: "rate limit exceeded - consider retry with backoff",
+			expectedErrMsg: "rate limit exceeded",
 		},
 		{
 			name:       "server_error",
@@ -228,7 +222,7 @@ func TestOpenAIProvider_ErrorHandling(t *testing.T) {
 					"type": "server_error"
 				}
 			}`,
-			expectedErrMsg: "server error - retry may succeed",
+			expectedErrMsg: "server error",
 		},
 	}
 
@@ -241,7 +235,6 @@ func TestOpenAIProvider_ErrorHandling(t *testing.T) {
 			}))
 			defer server.Close()
 
-			// Create provider with mock server URL
 			config := ClientConfig{
 				APIKey:  "test-api-key",
 				Model:   "gpt-4",
@@ -251,7 +244,6 @@ func TestOpenAIProvider_ErrorHandling(t *testing.T) {
 			provider, err := newOpenAIProvider(config)
 			require.NoError(t, err)
 
-			// Make request that should fail
 			_, _, _, err = provider.DoRequest(context.Background(), "test prompt", nil)
 
 			require.Error(t, err)
@@ -260,8 +252,8 @@ func TestOpenAIProvider_ErrorHandling(t *testing.T) {
 	}
 }
 
-// TestOpenAIProvider_ContextCancellation tests that the OpenAI provider
-// correctly handles context cancellation.
+// TestOpenAIProvider_ContextCancellation verifies that the OpenAI provider
+// correctly handles request cancellation through context.
 func TestOpenAIProvider_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("Server handler should not be called due to context cancellation")
@@ -286,8 +278,8 @@ func TestOpenAIProvider_ContextCancellation(t *testing.T) {
 	assert.Contains(t, err.Error(), "context canceled")
 }
 
-// TestOpenAIProvider_Configuration tests the configuration of the OpenAI provider.
-// It covers scenarios like missing API keys and default model selection.
+// TestOpenAIProvider_Configuration validates the configuration handling
+// for the OpenAI provider, including API key validation and model management.
 func TestOpenAIProvider_Configuration(t *testing.T) {
 	t.Run("missing_api_key", func(t *testing.T) {
 		config := ClientConfig{
@@ -296,7 +288,7 @@ func TestOpenAIProvider_Configuration(t *testing.T) {
 
 		_, err := newOpenAIProvider(config)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "OpenAI API key cannot be empty")
+		assert.Contains(t, err.Error(), "API key cannot be empty")
 	})
 
 	t.Run("default_model", func(t *testing.T) {
@@ -334,7 +326,7 @@ func TestOpenAIProvider_Configuration(t *testing.T) {
 	})
 }
 
-// TestOpenAIProvider_Integration tests the OpenAI provider against the live API.
+// TestOpenAIProvider_Integration performs integration tests against the live OpenAI API.
 // These tests are skipped if the OPENAI_API_KEY environment variable is not set.
 func TestOpenAIProvider_Integration(t *testing.T) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
@@ -356,7 +348,7 @@ func TestOpenAIProvider_Integration(t *testing.T) {
 			"Say 'Hello, World!' and nothing else.",
 			map[string]any{
 				"max_tokens":  10,
-				"temperature": float32(0.1), // Low temperature for consistent responses
+				"temperature": float32(0.1), // Use low temperature for consistent responses.
 			},
 		)
 
@@ -380,9 +372,9 @@ func TestOpenAIProvider_Integration(t *testing.T) {
 			context.Background(),
 			"What is 2+2?",
 			map[string]any{
-				"system_prompt": "You are a helpful math assistant. Always provide direct numerical answers.",
-				"max_tokens":    20,
-				"temperature":   float32(0.1),
+				"system":      "You are a helpful math assistant. Always provide direct numerical answers.",
+				"max_tokens":  20,
+				"temperature": float32(0.1),
 			},
 		)
 
@@ -390,7 +382,7 @@ func TestOpenAIProvider_Integration(t *testing.T) {
 		assert.NotEmpty(t, response)
 		assert.Greater(t, tokensIn, 0)
 		assert.Greater(t, tokensOut, 0)
-		assert.Contains(t, response, "4") // Should contain the answer
+		assert.Contains(t, response, "4")
 		t.Logf("Response: %s (tokens in: %d, out: %d)", response, tokensIn, tokensOut)
 	})
 
@@ -464,7 +456,6 @@ func TestOpenAIProvider_Performance(t *testing.T) {
 	provider, err := newOpenAIProvider(config)
 	require.NoError(t, err)
 
-	// Test multiple concurrent requests
 	t.Run("concurrent_requests", func(t *testing.T) {
 		const numRequests = 10
 		responses := make(chan struct{}, numRequests)
@@ -481,15 +472,14 @@ func TestOpenAIProvider_Performance(t *testing.T) {
 			}(i)
 		}
 
-		// Wait for all requests to complete
 		for i := 0; i < numRequests; i++ {
 			<-responses
 		}
 	})
 }
 
-// TestOpenAIProvider_TypeSafety tests the provider's ability to handle various
-// data types for options, ensuring type safety and graceful degradation.
+// TestOpenAIProvider_TypeSafety ensures that the provider handles various
+// data types for options gracefully, maintaining type safety.
 func TestOpenAIProvider_TypeSafety(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := mockOpenAIResponse{
@@ -574,7 +564,7 @@ func TestOpenAIProvider_TypeSafety(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// This should not panic despite type mismatches
+			// This call should not panic despite type mismatches in options.
 			_, _, _, err := provider.DoRequest(
 				context.Background(),
 				"Test prompt",
@@ -585,8 +575,8 @@ func TestOpenAIProvider_TypeSafety(t *testing.T) {
 	}
 }
 
-// TestOpenAIProvider_ThreadSafety tests the thread safety of the OpenAI provider,
-// particularly around concurrent access to the model field.
+// TestOpenAIProvider_ThreadSafety verifies the thread-safe operations of the provider,
+// focusing on concurrent access to shared fields like the model name.
 func TestOpenAIProvider_ThreadSafety(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := mockOpenAIResponse{
@@ -638,10 +628,8 @@ func TestOpenAIProvider_ThreadSafety(t *testing.T) {
 	const numGoroutines = 10
 	const numOperations = 100
 
-	// Test concurrent model reads and writes
 	done := make(chan bool, numGoroutines*2)
 
-	// Concurrent readers
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			for j := 0; j < numOperations; j++ {
@@ -652,7 +640,6 @@ func TestOpenAIProvider_ThreadSafety(t *testing.T) {
 		}()
 	}
 
-	// Concurrent writers
 	models := []string{"gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"}
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
@@ -663,18 +650,16 @@ func TestOpenAIProvider_ThreadSafety(t *testing.T) {
 		}(i)
 	}
 
-	// Wait for all goroutines to complete
 	for i := 0; i < numGoroutines*2; i++ {
 		<-done
 	}
 
-	// Verify final state is consistent
 	finalModel := provider.GetModel()
 	assert.Contains(t, models, finalModel)
 }
 
-// TestOpenAIProvider_TokenHandlingFallback tests the fallback mechanism for
-// token estimation when the API response does not provide usage information.
+// TestOpenAIProvider_TokenHandlingFallback checks the fallback mechanism for token
+// estimation when the API response omits usage data.
 func TestOpenAIProvider_TokenHandlingFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := map[string]interface{}{
@@ -722,8 +707,8 @@ func TestOpenAIProvider_TokenHandlingFallback(t *testing.T) {
 	assert.InDelta(t, 4, tokensOut, 2)
 }
 
-// TestOpenAIProvider_TimeoutConfiguration tests the timeout configuration of
-// the OpenAI provider.
+// TestOpenAIProvider_TimeoutConfiguration verifies that the provider's
+// timeout settings are correctly applied.
 func TestOpenAIProvider_TimeoutConfiguration(t *testing.T) {
 	t.Run("timeout_configured", func(t *testing.T) {
 		config := ClientConfig{
@@ -749,86 +734,23 @@ func TestOpenAIProvider_TimeoutConfiguration(t *testing.T) {
 	})
 }
 
-// TestSafeTypeConversion tests the internal helper functions for safe type
-// conversion of options.
-func TestSafeTypeConversion(t *testing.T) {
-	t.Run("safeFloat32", func(t *testing.T) {
-		tests := []struct {
-			input    any
-			expected float32
-			ok       bool
-		}{
-			{float32(1.5), 1.5, true},
-			{float64(2.5), 2.5, true},
-			{int(3), 3.0, true},
-			{int64(4), 4.0, true},
-			{"invalid", 0, false},
-			{nil, 0, false},
-		}
+// TestOpenAIProvider runs the standard provider test suite for the OpenAI provider.
+func TestOpenAIProvider(t *testing.T) {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("OPENAI_API_KEY not set")
+	}
 
-		for _, tt := range tests {
-			result, ok := safeFloat32(tt.input)
-			assert.Equal(t, tt.ok, ok)
-			if tt.ok {
-				assert.Equal(t, tt.expected, result)
-			}
-		}
-	})
+	config := ClientConfig{
+		APIKey: apiKey,
+		Model:  "gpt-3.5-turbo", // Use cheaper model for tests
+	}
 
-	t.Run("safeInt", func(t *testing.T) {
-		tests := []struct {
-			input    any
-			expected int
-			ok       bool
-		}{
-			{int(1), 1, true},
-			{int64(2), 2, true},
-			{float32(3.9), 3, true}, // Should truncate
-			{float64(4.1), 4, true}, // Should truncate
-			{"invalid", 0, false},
-			{nil, 0, false},
-		}
+	suite := NewProviderTestSuite(t, "openai", config)
 
-		for _, tt := range tests {
-			result, ok := safeInt(tt.input)
-			assert.Equal(t, tt.ok, ok)
-			if tt.ok {
-				assert.Equal(t, tt.expected, result)
-			}
-		}
-	})
-
-	t.Run("validateTemperature", func(t *testing.T) {
-		tests := []struct {
-			input    float32
-			expected float32
-		}{
-			{-1.0, 0.0}, // Below minimum
-			{0.0, 0.0},  // At minimum
-			{1.0, 1.0},  // Valid middle
-			{2.0, 2.0},  // At maximum
-			{3.0, 2.0},  // Above maximum
-		}
-
-		for _, tt := range tests {
-			result := validateTemperature(tt.input)
-			assert.Equal(t, tt.expected, result)
-		}
-	})
-
-	t.Run("validateMaxTokens", func(t *testing.T) {
-		tests := []struct {
-			input    int
-			expected int
-		}{
-			{-10, 0},   // Negative
-			{0, 0},     // Zero
-			{100, 100}, // Positive
-		}
-
-		for _, tt := range tests {
-			result := validateMaxTokens(tt.input)
-			assert.Equal(t, tt.expected, result)
-		}
-	})
+	t.Run("BasicRequest", func(t *testing.T) { suite.TestBasicRequest() })
+	t.Run("RequestWithOptions", func(t *testing.T) { suite.TestRequestWithOptions() })
+	t.Run("ErrorHandling", func(t *testing.T) { suite.TestErrorHandling() })
+	t.Run("ContextCancellation", func(t *testing.T) { suite.TestContextCancellation() })
+	t.Run("ModelGetterSetter", func(t *testing.T) { suite.TestModelGetterSetter() })
 }

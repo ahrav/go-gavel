@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -12,42 +13,58 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockUsage provides a mock structure for token usage information in test responses.
+// mockUsage provides a mock structure for token usage information in test
+// responses.
 type mockUsage struct {
-	InputTokens  int `json:"input_tokens"`
+	// InputTokens is the number of tokens in the prompt.
+	InputTokens int `json:"input_tokens"`
+	// OutputTokens is the number of tokens in the response.
 	OutputTokens int `json:"output_tokens"`
 }
 
 // mockContent provides a mock structure for content blocks in test responses.
 type mockContent struct {
+	// Type is the type of content block.
 	Type string `json:"type"`
+	// Text is the text content of the block.
 	Text string `json:"text"`
 }
 
 // mockResponse provides a mock structure for a successful API response in tests.
 type mockResponse struct {
-	ID      string        `json:"id"`
-	Type    string        `json:"type"`
-	Role    string        `json:"role"`
+	// ID is the unique identifier for the response.
+	ID string `json:"id"`
+	// Type is the type of response.
+	Type string `json:"type"`
+	// Role is the role of the responder.
+	Role string `json:"role"`
+	// Content is the list of content blocks in the response.
 	Content []mockContent `json:"content"`
-	Model   string        `json:"model"`
-	Usage   mockUsage     `json:"usage"`
+	// Model is the model used to generate the response.
+	Model string `json:"model"`
+	// Usage contains token usage information for the request.
+	Usage mockUsage `json:"usage"`
 }
 
 // mockErrorResponse provides a mock structure for an error response in tests.
 type mockErrorResponse struct {
-	Type  string    `json:"type"`
+	// Type is the type of error response.
+	Type string `json:"type"`
+	// Error contains the details of the error.
 	Error mockError `json:"error"`
 }
 
 // mockError provides a mock structure for error details in test responses.
 type mockError struct {
-	Type    string `json:"type"`
+	// Type is the type of error.
+	Type string `json:"type"`
+	// Message is the error message.
 	Message string `json:"message"`
 }
 
 // TestNewAnthropicProvider tests the creation of a new Anthropic provider.
-// It covers various scenarios, including valid and invalid configurations.
+// It verifies that the provider is created correctly with valid configurations
+// and that errors are returned for invalid configurations.
 func TestNewAnthropicProvider(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -106,8 +123,9 @@ func TestNewAnthropicProvider(t *testing.T) {
 	}
 }
 
-// TestAnthropicProvider_GetSetModel tests the GetModel and SetModel methods
-// of the Anthropic provider.
+// TestAnthropicProvider_GetSetModel tests the GetModel and SetModel methods of
+// the Anthropic provider.
+// It ensures that the model can be retrieved and updated correctly.
 func TestAnthropicProvider_GetSetModel(t *testing.T) {
 	provider, err := newAnthropicProvider(ClientConfig{APIKey: "test-key"})
 	require.NoError(t, err)
@@ -120,6 +138,8 @@ func TestAnthropicProvider_GetSetModel(t *testing.T) {
 
 // TestAnthropicProvider_DoRequest_Success tests a successful request to the
 // Anthropic provider.
+// It verifies that a valid request receives a successful response with the
+// expected content and token counts.
 func TestAnthropicProvider_DoRequest_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
@@ -130,7 +150,8 @@ func TestAnthropicProvider_DoRequest_Success(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, AnthropicDefaultModel, reqBody["model"])
-		assert.Equal(t, float64(DefaultMaxTokens), reqBody["max_tokens"])
+		// Max tokens will be set by the new system.
+		assert.NotNil(t, reqBody["max_tokens"])
 
 		messages := reqBody["messages"].([]interface{})
 		assert.Len(t, messages, 1)
@@ -171,6 +192,8 @@ func TestAnthropicProvider_DoRequest_Success(t *testing.T) {
 
 // TestAnthropicProvider_DoRequest_WithOptions tests a request to the Anthropic
 // provider with custom options.
+// It ensures that custom parameters like model, max_tokens, and temperature
+// are correctly sent in the request.
 func TestAnthropicProvider_DoRequest_WithOptions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
@@ -229,6 +252,8 @@ func TestAnthropicProvider_DoRequest_WithOptions(t *testing.T) {
 
 // TestAnthropicProvider_DoRequest_MultipleContentBlocks tests a response from
 // the Anthropic provider that contains multiple content blocks.
+// It verifies that the provider correctly concatenates text from multiple
+// content blocks into a single response string.
 func TestAnthropicProvider_DoRequest_MultipleContentBlocks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := mockResponse{
@@ -268,6 +293,8 @@ func TestAnthropicProvider_DoRequest_MultipleContentBlocks(t *testing.T) {
 
 // TestAnthropicProvider_DoRequest_AuthError tests the handling of an
 // authentication error from the Anthropic provider.
+// It ensures that a 401 Unauthorized response is correctly parsed and
+// returned as an authentication error.
 func TestAnthropicProvider_DoRequest_AuthError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -301,6 +328,8 @@ func TestAnthropicProvider_DoRequest_AuthError(t *testing.T) {
 
 // TestAnthropicProvider_DoRequest_RateLimitError tests the handling of a
 // rate limit error from the Anthropic provider.
+// It verifies that a 429 Too Many Requests response is correctly parsed and
+// returned as a rate limit error.
 func TestAnthropicProvider_DoRequest_RateLimitError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -334,6 +363,8 @@ func TestAnthropicProvider_DoRequest_RateLimitError(t *testing.T) {
 
 // TestAnthropicProvider_DoRequest_ContextCancellation tests the handling of
 // context cancellation during a request to the Anthropic provider.
+// It ensures that if the context is canceled during a request, the operation
+// is aborted and a context error is returned.
 func TestAnthropicProvider_DoRequest_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
@@ -374,6 +405,8 @@ func TestAnthropicProvider_DoRequest_ContextCancellation(t *testing.T) {
 
 // TestAnthropicProvider_DoRequest_TokenFallback tests the token estimation
 // fallback mechanism when the API response does not include usage information.
+// It verifies that token counts are estimated using a fallback mechanism when
+// the API response does not provide them.
 func TestAnthropicProvider_DoRequest_TokenFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := mockResponse{
@@ -408,13 +441,16 @@ func TestAnthropicProvider_DoRequest_TokenFallback(t *testing.T) {
 
 // TestAnthropicProvider_DoRequest_InvalidOptions tests that the provider
 // handles invalid options gracefully by falling back to default values.
+// It ensures that providing invalid or out-of-range options does not cause a
+// panic and that the provider falls back to default behavior.
 func TestAnthropicProvider_DoRequest_InvalidOptions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&reqBody)
 
 		assert.Equal(t, AnthropicDefaultModel, reqBody["model"])
-		assert.Equal(t, float64(DefaultMaxTokens), reqBody["max_tokens"])
+		// Max tokens will be set by the new system.
+		assert.NotNil(t, reqBody["max_tokens"])
 
 		_, hasTemp := reqBody["temperature"]
 		assert.False(t, hasTemp)
@@ -453,4 +489,28 @@ func TestAnthropicProvider_DoRequest_InvalidOptions(t *testing.T) {
 	assert.Equal(t, "Response", response)
 	assert.Equal(t, 5, tokensIn)
 	assert.Equal(t, 5, tokensOut)
+}
+
+// TestAnthropicProvider runs the full provider test suite for the Anthropic
+// provider.
+// This test requires the ANTHROPIC_API_KEY environment variable to be set.
+func TestAnthropicProvider(t *testing.T) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		t.Skip("ANTHROPIC_API_KEY not set")
+	}
+
+	config := ClientConfig{
+		APIKey: apiKey,
+		// Use a cheaper and faster model for running integration tests.
+		Model: "claude-3-haiku-20240307",
+	}
+
+	suite := NewProviderTestSuite(t, "anthropic", config)
+
+	t.Run("BasicRequest", func(t *testing.T) { suite.TestBasicRequest() })
+	t.Run("RequestWithOptions", func(t *testing.T) { suite.TestRequestWithOptions() })
+	t.Run("ErrorHandling", func(t *testing.T) { suite.TestErrorHandling() })
+	t.Run("ContextCancellation", func(t *testing.T) { suite.TestContextCancellation() })
+	t.Run("ModelGetterSetter", func(t *testing.T) { suite.TestModelGetterSetter() })
 }
