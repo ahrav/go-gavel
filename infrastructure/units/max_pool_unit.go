@@ -1,5 +1,3 @@
-// Package units provides domain-specific evaluation units that implement
-// the ports.Unit interface for the go-gavel evaluation engine.
 package units
 
 import (
@@ -135,7 +133,8 @@ func (mpu *MaxPoolUnit) Aggregate(
 	var tieCount int
 
 	for i, score := range scores {
-		// Validate score is not NaN or infinite.
+		// Validate score is not NaN or infinite to prevent corrupted aggregation.
+		// NaN and infinite values can break comparison logic and produce invalid results.
 		if math.IsNaN(score) || math.IsInf(score, 0) {
 			return domain.Answer{}, 0, fmt.Errorf("invalid score at index %d: %f", i, score)
 		}
@@ -143,9 +142,9 @@ func (mpu *MaxPoolUnit) Aggregate(
 		if score > maxScore {
 			maxScore = score
 			winnerIdx = i
-			tieCount = 1
+			tieCount = 1 // Reset tie count when new max found
 		} else if score == maxScore {
-			tieCount++
+			tieCount++ // Track ties for tie-breaking logic
 		}
 	}
 
@@ -155,22 +154,27 @@ func (mpu *MaxPoolUnit) Aggregate(
 			ErrBelowMinScore, maxScore, mpu.config.MinScore)
 	}
 
-	// Handle tie-breaking.
+	// Handle tie-breaking when multiple candidates have the same highest score.
+	// The strategy chosen affects determinism and fairness of selection.
 	if tieCount > 1 {
 		switch mpu.config.TieBreaker {
 		case TieFirst:
 			// Keep the first occurrence (winnerIdx is already correct).
+			// This provides deterministic, reproducible results.
 		case TieError:
+			// Fail explicitly when ties occur, forcing caller to handle ambiguity.
 			return domain.Answer{}, 0, fmt.Errorf("%w: %d answers with score %.3f", ErrTie, tieCount, maxScore)
 		case TieRandom:
-			// Count how many candidates have the max score
+			// Randomly select among tied candidates for fairness.
+			// This prevents systematic bias toward first/last positions.
 			tiedCandidates := make([]int, 0, tieCount)
 			for i, score := range scores {
 				if score == maxScore {
 					tiedCandidates = append(tiedCandidates, i)
 				}
 			}
-			// Use crypto/rand for unbiased selection
+			// Use crypto/rand for cryptographically secure, unbiased selection.
+			// This ensures no predictable patterns in tie-breaking decisions.
 			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(tiedCandidates))))
 			if err != nil {
 				return domain.Answer{}, 0, fmt.Errorf("failed to generate random number: %w", err)

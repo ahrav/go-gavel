@@ -1,5 +1,27 @@
-// Package units provides domain-specific evaluation units that implement
-// the ports.Unit interface for the go-gavel evaluation engine.
+// Package units provides domain-specific evaluation units for the go-gavel
+// evaluation engine. Each unit implements deterministic or LLM-based scoring
+// algorithms that process candidate answers against reference criteria.
+//
+// Units are stateless, thread-safe components that transform evaluation state
+// by computing judge scores, aggregating results, or performing verification.
+// The package supports three primary unit categories:
+//
+//   - Scoring Units: Generate scores for individual answers (ScoreJudgeUnit)
+//   - Aggregation Units: Combine multiple scores into final decisions (MedianPoolUnit, ArithmeticMeanUnit, MaxPoolUnit)
+//   - Verification Units: Validate evaluation quality and flag human review needs (VerificationUnit)
+//   - Matching Units: Compare answers against reference criteria (ExactMatchUnit, FuzzyMatchUnit)
+//
+// Architecture Integration:
+//
+// Units integrate with the go-gavel evaluation engine through the ports.Unit interface,
+// enabling flexible pipeline composition and dynamic unit registration.
+// All units operate on domain.State immutably and support context cancellation.
+//
+// Thread Safety and Concurrency:
+//
+// All units are designed for concurrent execution within evaluation pipelines.
+// Units maintain no internal state between Execute calls and handle concurrent
+// access to shared resources (like LLM clients) through appropriate synchronization.
 package units
 
 import (

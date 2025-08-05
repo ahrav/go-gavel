@@ -68,6 +68,11 @@ var (
 	// KeyBudget stores the complete budget report object for tracking
 	// resource consumption.
 	KeyBudget = Key[*BudgetReport]{"budget"}
+
+	// KeyReferenceAnswer stores the ground truth reference answer for
+	// deterministic evaluation units (ExactMatchUnit, FuzzyMatchUnit).
+	// This enables evaluation against known correct answers without LLM involvement.
+	KeyReferenceAnswer = Key[string]{"reference_answer"}
 )
 
 // deepCopyValue creates a deep copy of a value to ensure true immutability.

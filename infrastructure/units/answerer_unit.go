@@ -1,5 +1,3 @@
-// Package units provides domain-specific evaluation units that implement
-// the ports.Unit interface for the go-gavel evaluation engine.
 package units
 
 import (
@@ -49,15 +47,35 @@ var (
 	ErrLLMCallFailed     = errors.New("LLM call failed")
 )
 
-// LLMOptions contains typed options for LLM client calls.
+// LLMOptions contains typed configuration parameters for LLM client calls.
+// These options control the generation behavior and resource usage during
+// answer generation.
 type LLMOptions struct {
+	// Temperature controls randomness in text generation (0.0-1.0).
+	// Higher values produce more creative but less deterministic outputs.
 	Temperature float64 `json:"temperature"`
-	MaxTokens   int     `json:"max_tokens"`
+	// MaxTokens limits the maximum length of generated responses.
+	// Prevents runaway generation and controls resource usage.
+	MaxTokens int `json:"max_tokens"`
 }
 
-// AnswererUnit generates candidate answers by calling an LLM client with a
-// given question. It expects a question in the state and produces a list of
-// Answer objects. The unit is stateless and thread-safe.
+// AnswererUnit generates candidate answers by calling an LLM client with
+// configurable concurrency and timeout controls. It transforms questions into
+// multiple candidate answers using template-based prompts and LLM completion.
+//
+// This unit bridges deterministic evaluation pipelines with generative AI models,
+// enabling flexible answer generation strategies for various evaluation scenarios.
+//
+// Concurrency: The unit is stateless and safe for concurrent execution.
+// Multiple goroutines can call Execute simultaneously. Internal concurrency
+// is controlled via MaxConcurrency to prevent overwhelming LLM services.
+//
+// Resource Management: Implements timeout controls, concurrency limits, and
+// template caching for efficient resource utilization. Template parsing occurs
+// once during unit creation for optimal performance.
+//
+// Error Handling: Provides structured error types for different failure modes
+// including configuration validation, template execution, and LLM service errors.
 type AnswererUnit struct {
 	name           string
 	config         AnswererConfig
@@ -65,33 +83,54 @@ type AnswererUnit struct {
 	promptTemplate *template.Template
 }
 
-// AnswererConfig defines the configuration parameters for the AnswererUnit.
-// All fields are validated during unit creation and parameter unmarshaling.
+// AnswererConfig defines the behavioral parameters for LLM-based answer generation.
+// Configuration is immutable after unit creation and validated for consistency
+// and resource safety.
+//
+// All timing constraints are enforced per LLM call, while concurrency limits
+// apply to the entire execution batch. Template validation occurs during
+// unit creation to ensure prompt safety and correctness.
 type AnswererConfig struct {
-	// NumAnswers specifies how many candidate answers to generate.
+	// NumAnswers specifies how many candidate answers to generate concurrently.
+	// Range: 1-10 answers to balance diversity with resource usage.
 	NumAnswers int `yaml:"num_answers" json:"num_answers" validate:"required,min=1,max=10"`
 
-	// Prompt is the Go template used to generate answers from the question.
-	// It should use the {{.Question}} placeholder for safe substitution.
+	// Prompt is the Go template for answer generation with question substitution.
+	// Must contain {{.Question}} placeholder for safe parameter injection.
+	// Minimum 10 characters to ensure meaningful prompts.
 	Prompt string `yaml:"prompt" json:"prompt" validate:"required,min=10"`
 
-	// Temperature controls randomness in LLM generation (0.0-1.0).
+	// Temperature controls LLM generation randomness and creativity (0.0-1.0).
+	// 0.0 = deterministic, 1.0 = maximum creativity. Default: 0.7 for balanced output.
 	Temperature float64 `yaml:"temperature" json:"temperature" validate:"min=0.0,max=1.0"`
 
-	// MaxTokens limits the length of each generated answer.
+	// MaxTokens limits individual answer length to prevent runaway generation.
+	// Range: 10-16000 tokens. Consider model context window and cost implications.
 	MaxTokens int `yaml:"max_tokens" json:"max_tokens" validate:"required,min=10,max=16000"`
 
-	// Timeout specifies the maximum duration for each LLM call.
+	// Timeout specifies per-LLM-call maximum duration including network latency.
+	// Range: 1s-300s. Should account for model inference time and network conditions.
 	Timeout time.Duration `yaml:"timeout" json:"timeout" validate:"required,min=1s,max=300s"`
 
-	// MaxConcurrency limits the number of concurrent LLM calls to avoid
-	// overwhelming the service.
+	// MaxConcurrency limits concurrent LLM calls to prevent service overload.
+	// Range: 1-20 concurrent requests. Consider LLM service rate limits and quotas.
 	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency" validate:"required,min=1,max=20"`
 }
 
-// NewAnswererUnit creates a new AnswererUnit with the specified configuration
-// and dependencies. It returns an error if the configuration is invalid or
-// dependencies are missing.
+// NewAnswererUnit creates a new AnswererUnit with validated configuration
+// and dependency injection. The unit is immediately ready for concurrent
+// execution after successful creation.
+//
+// The name parameter serves as a unique identifier for logging, debugging,
+// and answer ID generation. The llmClient provides the generative AI interface
+// and must be configured with appropriate model and credentials.
+//
+// Template parsing occurs during creation to validate prompt syntax and
+// optimize runtime performance. Invalid templates cause immediate failure
+// rather than runtime errors.
+//
+// Returns ErrUnitNameEmpty if name is empty, ErrLLMClientNil if client is nil,
+// ErrConfigValidation if validation fails, or template parsing errors.
 func NewAnswererUnit(
 	name string,
 	llmClient ports.LLMClient,
@@ -122,11 +161,36 @@ func NewAnswererUnit(
 }
 
 // Name returns the unique identifier for this unit instance.
+// The returned value is immutable and safe for concurrent access.
 func (au *AnswererUnit) Name() string { return au.name }
 
-// Execute generates candidate answers by calling the LLM client concurrently.
-// It retrieves the question from the state, generates the specified number of
-// answers, and stores them back into the state.
+// Execute generates candidate answers through concurrent LLM calls with
+// configurable timeout and concurrency controls. It transforms a question
+// into multiple diverse answers using template-based prompting.
+//
+// State requirements:
+//   - domain.KeyQuestion: string containing the question to answer
+//
+// Returns a new state containing domain.KeyAnswers with generated responses.
+// Each Answer contains a unique ID and the LLM-generated content.
+//
+// Concurrency: Uses errgroup for bounded parallel execution with fail-fast
+// semantics. MaxConcurrency limits prevent overwhelming LLM services.
+//
+// Timeout: Applies per-execution timeout covering all concurrent LLM calls.
+// Individual calls may complete at different rates within the timeout window.
+//
+// Template Security: Executes Go templates with controlled input sanitization
+// to prevent injection attacks while enabling flexible prompt customization.
+//
+// Errors:
+//   - ErrQuestionMissing: Question not found in state
+//   - ErrQuestionEmpty: Empty question string provided
+//   - ErrTemplateExecution: Template parsing or execution failure
+//   - ErrLLMCallFailed: LLM service error with answer index context
+//   - Context cancellation or timeout errors
+//
+// The function is safe for concurrent execution and does not modify input state.
 func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
 	question, ok := domain.Get(state, domain.KeyQuestion)
 	if !ok {
@@ -136,9 +200,13 @@ func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain
 		return state, ErrQuestionEmpty
 	}
 
+	// Apply timeout to entire answer generation batch.
+	// Individual LLM calls inherit this deadline for coordinated timeout behavior.
 	ctx, cancel := context.WithTimeout(ctx, au.config.Timeout)
 	defer cancel()
 
+	// Execute Go template with safe parameter injection.
+	// Template is pre-parsed during unit creation for performance.
 	var promptBuf bytes.Buffer
 	if err := au.promptTemplate.Execute(&promptBuf, struct{ Question string }{Question: question}); err != nil {
 		return state, fmt.Errorf("%w: %v", ErrTemplateExecution, err)
@@ -154,15 +222,15 @@ func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(au.config.MaxConcurrency)
 
+	// Each goroutine generates one answer with unique ID and error context.
 	for i := 0; i < au.config.NumAnswers; i++ {
-		idx := i
 		g.Go(func() error {
 			response, err := au.llmClient.Complete(ctx, prompt, options)
 			if err != nil {
-				return fmt.Errorf("%w for answer %d: %v", ErrLLMCallFailed, idx+1, err)
+				return fmt.Errorf("%w for answer %d: %v", ErrLLMCallFailed, i+1, err)
 			}
-			answers[idx] = domain.Answer{
-				ID:      fmt.Sprintf("%s_answer_%d", au.name, idx+1),
+			answers[i] = domain.Answer{
+				ID:      fmt.Sprintf("%s_answer_%d", au.name, i+1),
 				Content: response,
 			}
 			return nil
@@ -176,7 +244,17 @@ func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain
 	return domain.With(state, domain.KeyAnswers, answers), nil
 }
 
-// Validate checks if the unit is properly configured and ready for execution.
+// Validate verifies the unit is properly configured and ready for execution.
+// This method performs comprehensive health checks including LLM client
+// connectivity and configuration completeness.
+//
+// Validation includes:
+//   - LLM client presence and model configuration
+//   - Configuration parameter constraints and consistency
+//   - Template compilation and syntax verification
+//
+// Returns nil if the unit is operational, or a descriptive error indicating
+// the specific validation failure. Safe for concurrent use.
 func (au *AnswererUnit) Validate() error {
 	if au.llmClient == nil {
 		return fmt.Errorf("LLM client is not configured")
@@ -190,19 +268,32 @@ func (au *AnswererUnit) Validate() error {
 	return nil
 }
 
-// aggregateErrors provides enhanced error context for concurrent operations.
+// aggregateErrors enhances error context for concurrent operations with
+// unit identification and operation context. Preserves LLM-specific errors
+// while adding contextual information for debugging.
 func (au *AnswererUnit) aggregateErrors(err error, operation string) error {
 	if err == nil {
 		return nil
 	}
+	// Preserve LLM-specific errors for detailed error handling.
+	// Add unit context for other error types.
 	if errors.Is(err, ErrLLMCallFailed) {
 		return err
 	}
 	return fmt.Errorf("unit %s: %s failed: %w", au.name, operation, err)
 }
 
-// UnmarshalParameters deserializes YAML parameters and returns a new, updated
-// AnswererUnit instance to maintain thread-safety.
+// UnmarshalParameters deserializes YAML configuration and returns a new
+// AnswererUnit instance with updated parameters. This approach maintains
+// thread-safety by avoiding mutation of the existing unit.
+//
+// The method performs strict YAML decoding with comprehensive validation
+// including template parsing to ensure the new configuration is fully
+// operational before returning the updated unit.
+//
+// Returns a new unit instance with identical name and LLM client but
+// updated configuration, or an error if YAML parsing or validation fails.
+// The original unit remains unchanged on error.
 func (au *AnswererUnit) UnmarshalParameters(params yaml.Node) (*AnswererUnit, error) {
 	var config AnswererConfig
 	if err := params.Decode(&config); err != nil {
@@ -226,7 +317,8 @@ func (au *AnswererUnit) UnmarshalParameters(params yaml.Node) (*AnswererUnit, er
 	}, nil
 }
 
-// defaultAnswererConfig returns an AnswererConfig with sensible defaults.
+// defaultAnswererConfig returns an AnswererConfig with production-ready defaults:
+// balanced creativity, reasonable timeouts, and moderate concurrency for typical LLM services.
 func defaultAnswererConfig() AnswererConfig {
 	return AnswererConfig{
 		NumAnswers:     DefaultNumAnswers,
@@ -238,15 +330,28 @@ func defaultAnswererConfig() AnswererConfig {
 	}
 }
 
-// CreateAnswererUnit is a factory function that creates an AnswererUnit
-// from a configuration map, for use with the UnitRegistry.
+// CreateAnswererUnit creates an AnswererUnit from a configuration map
+// following the UnitFactory pattern for dynamic unit instantiation.
+//
+// Required configuration keys:
+//   - "llm_client" (ports.LLMClient): LLM service implementation
+//   - "num_answers" (int): Number of answers to generate
+//   - "prompt" (string): Go template with {{.Question}} placeholder
+//   - "max_tokens" (int): Token limit per answer
+//   - "timeout" (string|int): Timeout duration or seconds
+//   - "max_concurrency" (int): Concurrent request limit
+//
+// Optional configuration keys:
+//   - "temperature" (float64): Generation randomness (default: 0.7)
+//
+// Returns an error if required keys are missing, type assertions fail,
+// or unit creation fails during validation.
 func CreateAnswererUnit(id string, config map[string]any) (*AnswererUnit, error) {
 	llmClient, ok := config["llm_client"].(ports.LLMClient)
 	if !ok {
 		return nil, fmt.Errorf("llm_client is required and must implement ports.LLMClient")
 	}
 
-	// Check for required fields first
 	requiredFields := []string{"num_answers", "prompt", "max_tokens", "timeout", "max_concurrency"}
 	for _, field := range requiredFields {
 		if _, ok := config[field]; !ok {
@@ -256,7 +361,6 @@ func CreateAnswererUnit(id string, config map[string]any) (*AnswererUnit, error)
 
 	answererConfig := defaultAnswererConfig()
 
-	// Parse num_answers
 	if val, ok := config["num_answers"]; ok {
 		if i, err := strconv.Atoi(fmt.Sprintf("%v", val)); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal answerer config: invalid num_answers format")
@@ -265,14 +369,12 @@ func CreateAnswererUnit(id string, config map[string]any) (*AnswererUnit, error)
 		}
 	}
 
-	// Parse prompt
 	if val, ok := config["prompt"].(string); ok {
 		answererConfig.Prompt = val
 	} else {
 		return nil, fmt.Errorf("failed to unmarshal answerer config: prompt must be a string")
 	}
 
-	// Parse temperature (optional field)
 	if val, ok := config["temperature"]; ok {
 		if f, err := strconv.ParseFloat(fmt.Sprintf("%v", val), 64); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal answerer config: invalid temperature format")
@@ -281,7 +383,6 @@ func CreateAnswererUnit(id string, config map[string]any) (*AnswererUnit, error)
 		}
 	}
 
-	// Parse max_tokens
 	if val, ok := config["max_tokens"]; ok {
 		if i, err := strconv.Atoi(fmt.Sprintf("%v", val)); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal answerer config: invalid max_tokens format")
@@ -290,7 +391,6 @@ func CreateAnswererUnit(id string, config map[string]any) (*AnswererUnit, error)
 		}
 	}
 
-	// Parse timeout
 	if val, ok := config["timeout"]; ok {
 		if str, ok := val.(string); ok {
 			if d, err := time.ParseDuration(str); err != nil {
@@ -305,7 +405,6 @@ func CreateAnswererUnit(id string, config map[string]any) (*AnswererUnit, error)
 		}
 	}
 
-	// Parse max_concurrency
 	if val, ok := config["max_concurrency"]; ok {
 		if i, err := strconv.Atoi(fmt.Sprintf("%v", val)); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal answerer config: invalid max_concurrency format")

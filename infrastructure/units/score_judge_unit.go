@@ -33,10 +33,10 @@ const (
 	DefaultJudgeTemperature    = 0.0 // Default temperature for consistent scoring
 )
 
-// ScoreJudgeUnit evaluates and scores individual candidate answers using an LLM client.
-// It expects answers in state and produces JudgeSummary objects with scores.
-// The unit scores each answer independently against the question and scoring criteria.
-// The unit is stateless and thread-safe for concurrent execution.
+// ScoreJudgeUnit scores candidate answers using LLM evaluation.
+// Reads answers from state via KeyAnswers and produces JudgeSummary objects
+// with scores, confidence ratings, and reasoning.
+// All operations are stateless and thread-safe.
 type ScoreJudgeUnit struct {
 	// name is the unique identifier for this unit instance.
 	name string
@@ -50,8 +50,8 @@ type ScoreJudgeUnit struct {
 	promptTemplate *template.Template
 }
 
-// ScoreJudgeConfig defines the configuration parameters for the ScoreJudgeUnit.
-// All fields are validated during unit creation and parameter unmarshaling.
+// ScoreJudgeConfig configures LLM-based answer scoring behavior.
+// All fields undergo validation during unit creation.
 type ScoreJudgeConfig struct {
 	// JudgePrompt is the Go template used to score answers.
 	// Should use {{.Question}} and {{.Answer}} placeholders for safe substitution.
@@ -80,16 +80,16 @@ type ScoreJudgeConfig struct {
 	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency" validate:"min=1,max=20"`
 }
 
-// ScoreScale represents a parsed and validated scoring range.
-// This value object eliminates repeated parsing and provides type safety.
+// ScoreScale represents a validated scoring range.
+// Eliminates repeated parsing and ensures type safety.
 type ScoreScale struct {
 	Min float64
 	Max float64
 }
 
-// ParseScoreScale parses a score scale string into a ScoreScale value object.
-// Supports formats like "1-10", "0.0-1.0", "1-5", "-5-10", etc.
-// Validates that scale values are within reasonable bounds.
+// ParseScoreScale parses score scale strings into validated ScoreScale values.
+// Supports formats: "1-10", "0.0-1.0", "-5-10".
+// Returns error if format is invalid or values exceed bounds.
 func ParseScoreScale(scaleStr string) (ScoreScale, error) {
 	// Split by dash and analyze the parts to detect valid vs invalid formats
 	parts := strings.Split(scaleStr, "-")
@@ -167,18 +167,18 @@ func ParseScoreScale(scaleStr string) (ScoreScale, error) {
 	return ScoreScale{Min: minVal, Max: maxVal}, nil
 }
 
-// Contains checks if a score falls within this scale's range.
+// Contains reports whether score falls within the scale range.
 func (s ScoreScale) Contains(score float64) bool {
 	return score >= s.Min && score <= s.Max
 }
 
-// String returns the string representation of the scale.
+// String returns the scale in "min-max" format.
 func (s ScoreScale) String() string {
 	return fmt.Sprintf("%.1f-%.1f", s.Min, s.Max)
 }
 
-// LLMJudgeResponse represents the expected JSON structure from the LLM
-// when scoring answers. This ensures reliable parsing and validation.
+// LLMJudgeResponse defines the expected JSON structure from LLM scoring calls.
+// Enables reliable parsing and response validation.
 type LLMJudgeResponse struct {
 	// Score is the numerical score for the answer within the configured range.
 	Score float64 `json:"score"`
@@ -193,8 +193,8 @@ type LLMJudgeResponse struct {
 	Version int `json:"version,omitempty"`
 }
 
-// defaultScoreJudgeConfig returns a ScoreJudgeConfig with sensible defaults.
-// This ensures consistent behavior when configuration values are missing.
+// defaultScoreJudgeConfig returns ScoreJudgeConfig with sensible defaults.
+// Ensures consistent behavior when configuration values are missing.
 func defaultScoreJudgeConfig() ScoreJudgeConfig {
 	return ScoreJudgeConfig{
 		JudgePrompt:    "Please score the following answer to the question on a scale from 1 to 10:\n\nQuestion: {{.Question}}\nAnswer: {{.Answer}}\n\nConsider accuracy, completeness, and clarity in your scoring.",
@@ -206,8 +206,8 @@ func defaultScoreJudgeConfig() ScoreJudgeConfig {
 	}
 }
 
-// validateConfig validates a ScoreJudgeConfig using the provided validator.
-// This centralizes validation logic to avoid duplication across multiple methods.
+// validateConfig validates ScoreJudgeConfig using struct validation.
+// Centralizes validation logic to avoid duplication.
 func validateConfig(v *validator.Validate, config ScoreJudgeConfig) error {
 	if err := v.Struct(config); err != nil {
 		return fmt.Errorf("configuration validation failed: %w", err)
@@ -222,10 +222,9 @@ func validateConfig(v *validator.Validate, config ScoreJudgeConfig) error {
 	return nil
 }
 
-// NewScoreJudgeUnit creates a new ScoreJudgeUnit with the specified configuration
-// and dependencies.
-// The unit validates its configuration and ensures the LLM client is available.
-// Returns an error if configuration validation fails or dependencies are missing.
+// NewScoreJudgeUnit creates a ScoreJudgeUnit with validated configuration.
+// Validates config parameters and ensures LLM client availability.
+// Returns error if validation fails or dependencies are missing.
 func NewScoreJudgeUnit(name string, llmClient ports.LLMClient, config ScoreJudgeConfig) (*ScoreJudgeUnit, error) {
 	if name == "" {
 		return nil, fmt.Errorf("unit name cannot be empty")
@@ -254,14 +253,17 @@ func NewScoreJudgeUnit(name string, llmClient ports.LLMClient, config ScoreJudge
 	}, nil
 }
 
-// Name returns the unique identifier for this unit instance.
-// The name is used for logging, debugging, and graph node referencing.
+// Name returns the unit identifier.
 func (sju *ScoreJudgeUnit) Name() string { return sju.name }
 
-// Execute scores candidate answers by calling the LLM client for individual evaluation.
-// It retrieves answers using KeyAnswers, scores each answer independently against the question,
-// and stores JudgeSummary objects in state using KeyJudgeScores.
-// Returns updated state with scoring results or an error if scoring fails.
+// Execute scores answers using LLM evaluation.
+//
+// Reads question from KeyQuestion and answers from KeyAnswers,
+// scores each answer concurrently with configured limits,
+// and stores JudgeSummary results in KeyJudgeScores.
+//
+// Returns error if question/answers missing, LLM calls fail,
+// confidence below threshold, or context cancellation occurs.
 func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
 	question, ok := domain.Get(state, domain.KeyQuestion)
 	if !ok {
@@ -279,15 +281,15 @@ func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (dom
 
 	// Score each answer concurrently for better performance.
 	judgeSummaries := make([]domain.JudgeSummary, len(answers))
-	var mu sync.Mutex // Protect judgeSummaries slice
+	var mu sync.Mutex // Protect judgeSummaries slice from concurrent writes
 
 	g, gctx := errgroup.WithContext(ctx)
 
 	// Limit concurrent LLM calls to avoid overwhelming the service.
-	// Use configured max concurrency or default if not set.
+	// Rate limiting prevents 429 errors and ensures fair resource usage.
 	maxConcurrency := sju.config.MaxConcurrency
 	if maxConcurrency <= 0 {
-		maxConcurrency = DefaultJudgeMaxConcurrency // Fallback to reasonable default
+		maxConcurrency = DefaultJudgeMaxConcurrency // Fallback for zero/negative values
 	}
 	g.SetLimit(maxConcurrency)
 
@@ -318,7 +320,8 @@ func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (dom
 				"max_tokens":  sju.config.MaxTokens,
 			}
 
-			// Request JSON output format if the provider supports it
+			// Request JSON output format if the provider supports it.
+			// Structured output reduces parsing errors and improves reliability.
 			if supportsJSONMode(sju.llmClient) {
 				options["response_format"] = map[string]string{"type": "json_object"}
 			}
@@ -343,7 +346,8 @@ func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (dom
 					sju.name, i+1, summary.Confidence, sju.config.MinConfidence, summary.Score, len(summary.Reasoning))
 			}
 
-			// Store the result in the correct position (thread-safe)
+			// Store the result in the correct position (thread-safe).
+			// Mutex ensures concurrent goroutines don't corrupt the slice.
 			mu.Lock()
 			judgeSummaries[i] = summary
 			mu.Unlock()
@@ -359,9 +363,9 @@ func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (dom
 	return domain.With(state, domain.KeyJudgeScores, judgeSummaries), nil
 }
 
-// Validate checks if the unit is properly configured and ready for execution.
-// It validates the configuration parameters and verifies LLM client availability.
-// Returns nil if validation passes, or an error describing what is invalid.
+// Validate checks unit readiness for execution.
+// Validates configuration parameters and LLM client availability.
+// Returns nil if ready, error describing invalid configuration otherwise.
 func (sju *ScoreJudgeUnit) Validate() error {
 	if sju.llmClient == nil {
 		return fmt.Errorf("unit %s: LLM client is not configured", sju.name)
@@ -381,19 +385,23 @@ func (sju *ScoreJudgeUnit) Validate() error {
 	return nil
 }
 
-// supportsJSONMode checks if the LLM client supports structured JSON output.
-// This is a simple heuristic - in production, you might check the client type
-// or have the client expose this capability directly.
+// supportsJSONMode reports whether the LLM client supports JSON response format.
+// Uses model name heuristics; production systems should expose this capability
+// through the client interface.
 func supportsJSONMode(client ports.LLMClient) bool {
-	// This is a simplified check. In practice, you'd check the model type
-	// or have the client interface expose this capability.
+	// Heuristic check based on model names.
+	// Production code should expose JSON capability through client interface.
 	model := client.GetModel()
 	return strings.Contains(strings.ToLower(model), "gpt") ||
 		strings.Contains(strings.ToLower(model), "claude")
 }
 
-// parseLLMResponse extracts score, reasoning, and confidence from LLM JSON response.
-// Expects structured JSON output with score, confidence, reasoning, and version fields.
+// parseLLMResponse extracts and validates scoring data from LLM JSON response.
+//
+// Handles various response formats including markdown code blocks and plain JSON.
+// Validates JSON structure, field constraints, and score range compliance.
+// Returns JudgeSummary with validated score, confidence, and reasoning.
+// Returns error if JSON extraction fails, validation fails, or score out of range.
 func (sju *ScoreJudgeUnit) parseLLMResponse(
 	response string,
 	judgeID string,
@@ -427,10 +435,16 @@ func (sju *ScoreJudgeUnit) parseLLMResponse(
 	}, nil
 }
 
-// extractJSON attempts to extract JSON from a response that might contain
-// additional text before or after the JSON object.
-// It handles various response formats including markdown code blocks and
-// text surrounding the JSON object.
+// extractJSON extracts JSON objects from LLM responses with surrounding text.
+//
+// Handles multiple formats:
+//   - Markdown code blocks (```json and ```)
+//   - Plain JSON objects with surrounding text
+//   - Nested JSON with proper brace counting
+//
+// Uses state machine to track string boundaries and escape sequences
+// for reliable JSON boundary detection.
+// Returns empty string if no valid JSON object found.
 func extractJSON(response string) string {
 	response = strings.TrimSpace(response)
 
@@ -451,7 +465,8 @@ func extractJSON(response string) string {
 		start := strings.Index(response, "```")
 		if start != -1 {
 			start += 3 // Move past "```"
-			// Skip any language identifier
+			// Skip any language identifier after opening backticks.
+			// Many LLMs include language hints like "json" or "javascript".
 			newlineIdx := strings.Index(response[start:], "\n")
 			if newlineIdx != -1 {
 				start += newlineIdx + 1
@@ -459,7 +474,8 @@ func extractJSON(response string) string {
 			end := strings.Index(response[start:], "```")
 			if end != -1 {
 				candidate := strings.TrimSpace(response[start : start+end])
-				// Check if it looks like JSON
+				// Basic JSON object detection - starts with opening brace.
+				// Avoids false positives with code blocks containing non-JSON.
 				if strings.HasPrefix(candidate, "{") {
 					return candidate
 				}
@@ -473,7 +489,8 @@ func extractJSON(response string) string {
 		return ""
 	}
 
-	// Find the matching closing brace, handling nested objects and strings
+	// Find the matching closing brace, handling nested objects and strings.
+	// State machine tracks brace nesting and string boundaries.
 	braceCount := 0
 	inString := false
 	escapeNext := false
@@ -515,7 +532,7 @@ func extractJSON(response string) string {
 	return ""
 }
 
-// validateScoreInRange checks if the score falls within the configured scale.
+// validateScoreInRange reports whether score falls within configured scale bounds.
 func (sju *ScoreJudgeUnit) validateScoreInRange(score float64) error {
 	scale, err := ParseScoreScale(sju.config.ScoreScale)
 	if err != nil {
@@ -529,10 +546,14 @@ func (sju *ScoreJudgeUnit) validateScoreInRange(score float64) error {
 	return nil
 }
 
-// UnmarshalParameters deserializes YAML configuration parameters and returns
-// a new ScoreJudgeUnit instance with the updated configuration.
-// This method maintains thread-safety by not mutating the existing unit.
-// Returns a new unit instance or an error if YAML parsing fails or validation fails.
+// UnmarshalParameters creates a new ScoreJudgeUnit with YAML configuration.
+//
+// Decodes YAML parameters into ScoreJudgeConfig, validates the configuration,
+// compiles the prompt template, and returns a new unit instance.
+// Maintains thread-safety by creating new instances rather than mutating.
+//
+// Returns error if YAML decoding fails, validation fails,
+// or prompt template compilation fails.
 func (sju *ScoreJudgeUnit) UnmarshalParameters(params yaml.Node) (*ScoreJudgeUnit, error) {
 	var config ScoreJudgeConfig
 
@@ -562,9 +583,13 @@ func (sju *ScoreJudgeUnit) UnmarshalParameters(params yaml.Node) (*ScoreJudgeUni
 	}, nil
 }
 
-// CreateScoreJudgeUnit is a factory function that creates a ScoreJudgeUnit
-// from a configuration map, following the UnitFactory pattern.
-// This function is used by the UnitRegistry for dynamic unit creation.
+// CreateScoreJudgeUnit creates a ScoreJudgeUnit from configuration map.
+//
+// Factory function used by UnitRegistry for dynamic unit creation.
+// Extracts LLM client from config, applies defaults, and handles
+// type conversion for numeric values from YAML/JSON.
+//
+// Returns error if LLM client missing or unit creation fails.
 func CreateScoreJudgeUnit(id string, config map[string]any) (*ScoreJudgeUnit, error) {
 	// Extract LLM client from config.
 	llmClient, ok := config["llm_client"].(ports.LLMClient)

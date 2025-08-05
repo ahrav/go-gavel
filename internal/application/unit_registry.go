@@ -108,6 +108,24 @@ func (r *DefaultUnitRegistry) registerBuiltinFactories() {
 		return unit, nil
 	}
 
+	// Register ExactMatchUnit factory.
+	r.factories["ExactMatch"] = func(id string, config map[string]any) (ports.Unit, error) {
+		unit, err := units.CreateExactMatchUnit(id, config)
+		if err != nil {
+			return nil, err
+		}
+		return unit, nil
+	}
+
+	// Register FuzzyMatchUnit factory.
+	r.factories["FuzzyMatch"] = func(id string, config map[string]any) (ports.Unit, error) {
+		unit, err := units.CreateFuzzyMatchUnit(id, config)
+		if err != nil {
+			return nil, err
+		}
+		return unit, nil
+	}
+
 }
 
 // CreateUnit creates a new unit instance based on the provided type,
