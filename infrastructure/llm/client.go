@@ -86,7 +86,6 @@ type TokenEstimator interface {
 // and operational concerns like rate limiting and circuit breaking.
 type ClientConfig struct {
 	// APIKey authenticates requests to the LLM provider.
-	// For Google provider, this field contains the path to credentials file.
 	APIKey string
 
 	// Model specifies which LLM model to use for requests.

@@ -18,7 +18,7 @@ func TestNewRegistry(t *testing.T) {
 			"openai": {
 				Type:         "openai",
 				EnvVar:       "OPENAI_API_KEY",
-				DefaultModel: "gpt-4",
+				DefaultModel: "gpt-4.1",
 			},
 		},
 		DefaultTimeout: 30 * time.Second,
@@ -54,7 +54,7 @@ func TestRegistry_RegisterClient(t *testing.T) {
 			"openai": {
 				Type:         "openai",
 				EnvVar:       "OPENAI_API_KEY",
-				DefaultModel: "gpt-4",
+				DefaultModel: "gpt-4.1",
 			},
 			"custom": {
 				Type:         "custom",
@@ -88,7 +88,7 @@ func TestRegistry_GetClient(t *testing.T) {
 			"openai": {
 				Type:         "openai",
 				EnvVar:       "OPENAI_API_KEY",
-				DefaultModel: "gpt-4",
+				DefaultModel: "gpt-4.1",
 			},
 		},
 	}
@@ -98,7 +98,7 @@ func TestRegistry_GetClient(t *testing.T) {
 	err = registry.InitializeProviders()
 	require.NoError(t, err, "Failed to initialize providers")
 
-	client, err := registry.GetClient("")
+	client, err := registry.GetDefaultClient()
 	assert.NoError(t, err, "Failed to get default client")
 	assert.NotNil(t, client, "Expected non-nil client")
 
@@ -108,6 +108,11 @@ func TestRegistry_GetClient(t *testing.T) {
 
 	_, err = registry.GetClient("nonexistent/model")
 	assert.Error(t, err, "Expected error for non-existent provider")
+
+	// Test that empty strings are rejected
+	_, err = registry.GetClient("")
+	assert.Error(t, err, "Expected error for empty string")
+	assert.Contains(t, err.Error(), "provider specification cannot be empty", "Error message should mention empty string")
 }
 
 // TestRegistry_InitializeProviders tests the initialization of providers from config.
@@ -115,7 +120,7 @@ func TestRegistry_InitializeProviders(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	
+
 	// Skip test if no real API key is available
 	t.Skip("skipping integration test - requires valid API key")
 	originalOpenAI := os.Getenv("OPENAI_API_KEY")
@@ -139,7 +144,7 @@ func TestRegistry_InitializeProviders(t *testing.T) {
 	providers := registry.GetRegisteredProviders()
 	assert.Contains(t, providers, "openai", "Expected OpenAI provider to be registered")
 
-	client, err := registry.GetClient("")
+	client, err := registry.GetDefaultClient()
 	assert.NoError(t, err, "Failed to get default client")
 
 	ctx := context.Background()
@@ -158,7 +163,7 @@ func TestRegistry_CachedClient(t *testing.T) {
 			"openai": {
 				Type:         "openai",
 				EnvVar:       "OPENAI_API_KEY",
-				DefaultModel: "gpt-4",
+				DefaultModel: "gpt-4.1",
 			},
 		},
 	}
@@ -205,7 +210,7 @@ func TestRegistry_CustomProvider(t *testing.T) {
 	err = registry.InitializeProviders()
 	require.NoError(t, err, "Failed to initialize providers")
 
-	client, err := registry.GetClient("")
+	client, err := registry.GetDefaultClient()
 	require.NoError(t, err, "Failed to get custom client")
 
 	assert.Equal(t, "custom-model", client.GetModel(), "Model mismatch")
@@ -292,4 +297,91 @@ func TestRegistry_EnvironmentVariables(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRegistry_ModelValidation tests that the registry validates models against supported models list.
+func TestRegistry_ModelValidation(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("CUSTOM_API_KEY", "custom-key")
+
+	RegisterProviderFactory("custom", func(config ClientConfig) (CoreLLM, error) {
+		return &customProvider{
+			apiKey: config.APIKey,
+			model:  config.Model,
+		}, nil
+	})
+
+	config := RegistryConfig{
+		DefaultProvider: "openai",
+		Providers: map[string]ProviderConfig{
+			"openai": {
+				Type:            "openai",
+				EnvVar:          "OPENAI_API_KEY",
+				DefaultModel:    "gpt-4",
+				SupportedModels: []string{"gpt-4", "gpt-3.5-turbo"},
+			},
+			"custom": {
+				Type:         "custom",
+				EnvVar:       "CUSTOM_API_KEY",
+				DefaultModel: "custom-model",
+				// No SupportedModels specified - should allow any model
+			},
+		},
+	}
+
+	registry, err := NewRegistry(config)
+	require.NoError(t, err, "Failed to create registry")
+
+	// Test valid model
+	client, err := registry.GetClient("openai/gpt-4")
+	assert.NoError(t, err, "Failed to get client with valid model")
+	assert.NotNil(t, client, "Expected non-nil client")
+
+	// Test another valid model
+	client, err = registry.GetClient("openai/gpt-3.5-turbo")
+	assert.NoError(t, err, "Failed to get client with valid model")
+	assert.NotNil(t, client, "Expected non-nil client")
+
+	// Test invalid model for provider with supported models list
+	_, err = registry.GetClient("openai/invalid-model")
+	assert.Error(t, err, "Expected error for invalid model")
+	assert.Contains(t, err.Error(), "not supported by provider", "Error should mention unsupported model")
+	assert.Contains(t, err.Error(), "invalid-model", "Error should mention the invalid model")
+
+	// Test provider without supported models list (should allow any model)
+	client, err = registry.GetClient("custom/any-model")
+	assert.NoError(t, err, "Provider without supported models should allow any model")
+	assert.NotNil(t, client, "Expected non-nil client")
+}
+
+// TestRegistry_GetDefaultClient tests the new GetDefaultClient method.
+func TestRegistry_GetDefaultClient(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	config := RegistryConfig{
+		DefaultProvider: "openai",
+		Providers: map[string]ProviderConfig{
+			"openai": {
+				Type:         "openai",
+				EnvVar:       "OPENAI_API_KEY",
+				DefaultModel: "gpt-4.1",
+			},
+		},
+	}
+
+	registry, err := NewRegistry(config)
+	require.NoError(t, err, "Failed to create registry")
+
+	// Test GetDefaultClient
+	client, err := registry.GetDefaultClient()
+	assert.NoError(t, err, "Failed to get default client")
+	assert.NotNil(t, client, "Expected non-nil client")
+	assert.Equal(t, "gpt-4.1", client.GetModel(), "Default client should use default model")
+
+	// Test that GetDefaultClient is equivalent to GetClient with explicit default provider/model
+	explicitClient, err := registry.GetClient("openai/gpt-4.1")
+	assert.NoError(t, err, "Failed to get explicit client")
+
+	// Both should have same model
+	assert.Equal(t, client.GetModel(), explicitClient.GetModel(), "Default and explicit clients should have same model")
 }

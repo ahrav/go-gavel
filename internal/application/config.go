@@ -53,7 +53,7 @@ type UnitConfig struct {
 	ID string `yaml:"id" validate:"required,alphanum,min=1,max=100"`
 	// Type specifies the evaluation unit implementation to instantiate,
 	// determining the available parameters and execution behavior.
-	Type string `yaml:"type" validate:"required,oneof=answerer score_judge verification arithmetic_mean max_pool median_pool custom"`
+	Type string `yaml:"type" validate:"required,oneof=answerer score_judge verification arithmetic_mean max_pool median_pool exact_match fuzzy_match custom"`
 	// Model specifies the LLM provider and model to use for this unit
 	// in the format "provider/model" or "provider/model@version".
 	// When omitted, the unit will use the default provider configured

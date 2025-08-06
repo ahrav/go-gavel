@@ -164,10 +164,10 @@ func TestClientComplete(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	
+
 	// Skip test if no real API key is available
 	t.Skip("skipping integration test - requires valid API key")
-	
+
 	client, err := NewClient("openai", ClientConfig{
 		APIKey: "test-api-key",
 		Model:  "gpt-4",
@@ -191,10 +191,10 @@ func TestClientCompleteWithUsage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	
+
 	// Skip test if no real API key is available
 	t.Skip("skipping integration test - requires valid API key")
-	
+
 	client, err := NewClient("anthropic", ClientConfig{
 		APIKey: "test-api-key",
 		Model:  "claude-3-sonnet",
@@ -249,7 +249,7 @@ func TestClientWithMiddleware(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	
+
 	// Skip test if no real API key is available
 	t.Skip("skipping integration test - requires valid API key")
 	metrics := newMockMetricsCollector()

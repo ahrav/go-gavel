@@ -51,11 +51,6 @@ func (m *mockUnitRegistry) CreateUnit(unitType string, id string, config map[str
 	}, nil
 }
 
-// RegisterUnitFactory is a no-op for the mock registry.
-func (m *mockUnitRegistry) RegisterUnitFactory(unitType string, factory ports.UnitFactory) error {
-	return nil
-}
-
 // GetSupportedTypes returns a static list of supported unit types for testing.
 func (m *mockUnitRegistry) GetSupportedTypes() []string {
 	return []string{"llm_judge", "code_analyzer", "metrics_collector", "custom"}

@@ -4,13 +4,9 @@ package application
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sort"
-	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,581 +48,246 @@ type testMockUnit struct {
 	name string
 }
 
-// Name returns the name of the mock unit.
-func (m *testMockUnit) Name() string {
-	return m.name
-}
+func (t *testMockUnit) Name() string { return t.name }
 
-// Execute is a no-op for the mock unit.
-func (m *testMockUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
+func (t *testMockUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
 	return state, nil
 }
 
-// Validate is a no-op for the mock unit.
-func (m *testMockUnit) Validate() error {
-	return nil
-}
+func (t *testMockUnit) Validate() error { return nil }
 
-// TestNewDefaultUnitRegistry tests the creation of a new default unit registry.
-func TestNewDefaultUnitRegistry(t *testing.T) {
-	t.Run("creates registry with LLM client", func(t *testing.T) {
+func TestNewRegistry(t *testing.T) {
+	t.Run("creates empty registry with LLM client", func(t *testing.T) {
 		mockClient := &mockLLMClient{model: "test-model"}
-		registry := NewDefaultUnitRegistry(mockClient)
+		registry := NewRegistry(mockClient)
 
 		assert.NotNil(t, registry)
-		assert.NotNil(t, registry.factories)
-		assert.Equal(t, mockClient, registry.llmClient)
 
-		// Verify that the built-in factories are registered.
+		// Registry starts empty - no units registered by default
 		supportedTypes := registry.GetSupportedTypes()
-		assert.Contains(t, supportedTypes, "answerer")
+		assert.Empty(t, supportedTypes)
+	})
+
+	t.Run("creates empty registry with nil LLM client", func(t *testing.T) {
+		registry := NewRegistry(nil)
+
+		assert.NotNil(t, registry)
+
+		// Registry starts empty - explicit registration required
+		supportedTypes := registry.GetSupportedTypes()
+		assert.Empty(t, supportedTypes)
+	})
+}
+
+func TestRegistry_RegisterBuiltinUnits(t *testing.T) {
+	t.Run("registers all builtin units explicitly", func(t *testing.T) {
+		mockClient := &mockLLMClient{model: "test-model"}
+		registry := NewRegistry(mockClient)
+
+		// Initially empty
+		assert.Empty(t, registry.GetSupportedTypes())
+
+		// Register builtin units
+		registry.RegisterBuiltinUnits()
+
+		// All 8 core units should now be registered
+		supportedTypes := registry.GetSupportedTypes()
+		assert.Len(t, supportedTypes, 8)
 		assert.Contains(t, supportedTypes, "score_judge")
-		assert.Contains(t, supportedTypes, "max_pool")
+		assert.Contains(t, supportedTypes, "answerer")
+		assert.Contains(t, supportedTypes, "verification")
+		assert.Contains(t, supportedTypes, "exact_match")
+		assert.Contains(t, supportedTypes, "fuzzy_match")
 		assert.Contains(t, supportedTypes, "arithmetic_mean")
+		assert.Contains(t, supportedTypes, "max_pool")
 		assert.Contains(t, supportedTypes, "median_pool")
 	})
-
-	t.Run("creates registry with nil LLM client", func(t *testing.T) {
-		registry := NewDefaultUnitRegistry(nil)
-
-		assert.NotNil(t, registry)
-		assert.NotNil(t, registry.factories)
-		assert.Nil(t, registry.llmClient)
-
-		// The built-in factories should still be registered.
-		supportedTypes := registry.GetSupportedTypes()
-		assert.Len(t, supportedTypes, 8) // answerer, score_judge, verification, arithmetic_mean, max_pool, median_pool, ExactMatch, FuzzyMatch
-	})
 }
 
-// TestCreateUnit_Success tests the successful creation of units.
-func TestCreateUnit_Success(t *testing.T) {
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
+func TestRegistry_Register(t *testing.T) {
+	t.Run("registers custom factory", func(t *testing.T) {
+		registry := NewRegistry(nil)
 
-	tests := []struct {
-		name     string
-		unitType string
-		unitID   string
-		config   map[string]any
-	}{
-		{
-			name:     "creates answerer unit",
-			unitType: "answerer",
-			unitID:   "test_answerer",
-			config: map[string]any{
-				"num_answers":     2,
-				"prompt":          "Answer this: {{.Question}}",
-				"temperature":     0.7,
-				"max_tokens":      100,
-				"timeout":         "30s",
-				"max_concurrency": 5,
-			},
-		},
-		{
-			name:     "creates answerer unit with minimal config",
-			unitType: "answerer",
-			unitID:   "minimal_answerer",
-			config: map[string]any{
-				"num_answers":     1,
-				"prompt":          "Simple prompt: {{.Question}}",
-				"max_tokens":      50,
-				"timeout":         "10s",
-				"max_concurrency": 1,
-			},
-		},
-		{
-			name:     "creates unit with nil config",
-			unitType: "max_pool",
-			unitID:   "test_pool",
-			config:   nil,
-		},
-		{
-			name:     "creates unit with empty config",
-			unitType: "max_pool",
-			unitID:   "empty_pool",
-			config:   map[string]any{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unit, err := registry.CreateUnit(tt.unitType, tt.unitID, tt.config)
-			require.NoError(t, err)
-			assert.NotNil(t, unit)
-			assert.Equal(t, tt.unitID, unit.Name())
-		})
-	}
-}
-
-// TestCreateUnit_Errors tests error conditions during unit creation.
-func TestCreateUnit_Errors(t *testing.T) {
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
-
-	tests := []struct {
-		name          string
-		unitType      string
-		unitID        string
-		config        map[string]any
-		expectedError string
-	}{
-		{
-			name:          "fails with unsupported unit type",
-			unitType:      "unsupported",
-			unitID:        "test_id",
-			config:        map[string]any{},
-			expectedError: "unsupported unit type",
-		},
-		{
-			name:          "fails with empty unit ID",
-			unitType:      "answerer",
-			unitID:        "",
-			config:        map[string]any{},
-			expectedError: "unit ID cannot be empty",
-		},
-		{
-			name:     "fails with invalid answerer config",
-			unitType: "answerer",
-			unitID:   "bad_answerer",
-			config: map[string]any{
-				"num_answers": -1, // Invalid value.
-				"prompt":      "test",
-			},
-			expectedError: "failed to create unit",
-		},
-		{
-			name:     "fails with missing required fields",
-			unitType: "answerer",
-			unitID:   "incomplete_answerer",
-			config: map[string]any{
-				"num_answers": 1,
-				// Missing required fields: prompt, max_tokens, timeout, max_concurrency.
-			},
-			expectedError: "failed to create unit",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unit, err := registry.CreateUnit(tt.unitType, tt.unitID, tt.config)
-			require.Error(t, err)
-			assert.Nil(t, unit)
-			assert.Contains(t, err.Error(), tt.expectedError)
-		})
-	}
-}
-
-// TestCreateUnit_YAMLConversionErrors tests for errors during YAML conversion.
-func TestCreateUnit_YAMLConversionErrors(t *testing.T) {
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
-
-	tests := []struct {
-		name          string
-		config        map[string]any
-		expectedError string
-	}{
-		{
-			name: "handles invalid duration format",
-			config: map[string]any{
-				"num_answers":     1,
-				"prompt":          "Test prompt: {{.Question}}",
-				"max_tokens":      100,
-				"timeout":         "invalid-duration", // Should fail.
-				"max_concurrency": 1,
-			},
-			expectedError: "failed to unmarshal answerer config",
-		},
-		{
-			name: "handles type mismatch in temperature",
-			config: map[string]any{
-				"num_answers":     1,
-				"prompt":          "Test prompt: {{.Question}}",
-				"temperature":     "not-a-number", // Should fail.
-				"max_tokens":      100,
-				"timeout":         "30s",
-				"max_concurrency": 1,
-			},
-			expectedError: "failed to unmarshal answerer config",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unit, err := registry.CreateUnit("answerer", "test_id", tt.config)
-			require.Error(t, err)
-			assert.Nil(t, unit)
-			assert.Contains(t, err.Error(), tt.expectedError)
-		})
-	}
-}
-
-// TestRegisterUnitFactory tests the registration of custom unit factories.
-func TestRegisterUnitFactory(t *testing.T) {
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
-
-	t.Run("registers new factory successfully", func(t *testing.T) {
-		customFactory := func(id string, config map[string]any) (ports.Unit, error) {
+		customFactory := func(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
 			return &testMockUnit{name: id}, nil
 		}
 
-		err := registry.RegisterUnitFactory("custom", customFactory)
-		require.NoError(t, err)
+		registry.Register("custom", customFactory)
 
-		// Verify that the factory is registered.
 		supportedTypes := registry.GetSupportedTypes()
 		assert.Contains(t, supportedTypes, "custom")
-
-		// Create a unit with the custom factory.
-		unit, err := registry.CreateUnit("custom", "test_custom", nil)
-		require.NoError(t, err)
-		assert.Equal(t, "test_custom", unit.Name())
 	})
 
-	t.Run("overrides existing factory", func(t *testing.T) {
-		// Register the initial factory.
-		factory1 := func(id string, config map[string]any) (ports.Unit, error) {
-			return &testMockUnit{name: "factory1_" + id}, nil
-		}
-		err := registry.RegisterUnitFactory("override_test", factory1)
-		require.NoError(t, err)
+	t.Run("panics on duplicate registration", func(t *testing.T) {
+		registry := NewRegistry(nil)
 
-		// Create a unit with the first factory.
-		unit1, err := registry.CreateUnit("override_test", "unit", nil)
-		require.NoError(t, err)
-		assert.Equal(t, "factory1_unit", unit1.Name())
-
-		// Override with a new factory.
-		factory2 := func(id string, config map[string]any) (ports.Unit, error) {
-			return &testMockUnit{name: "factory2_" + id}, nil
-		}
-		err = registry.RegisterUnitFactory("override_test", factory2)
-		require.NoError(t, err)
-
-		// Create a unit with the overridden factory.
-		unit2, err := registry.CreateUnit("override_test", "unit", nil)
-		require.NoError(t, err)
-		assert.Equal(t, "factory2_unit", unit2.Name())
-	})
-
-	t.Run("fails with empty unit type", func(t *testing.T) {
-		customFactory := func(id string, config map[string]any) (ports.Unit, error) {
+		customFactory := func(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
 			return &testMockUnit{name: id}, nil
 		}
 
-		err := registry.RegisterUnitFactory("", customFactory)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unit type cannot be empty")
-	})
+		registry.Register("custom", customFactory)
 
-	t.Run("fails with nil factory", func(t *testing.T) {
-		err := registry.RegisterUnitFactory("nil_factory", nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "factory function cannot be nil")
-	})
-}
-
-// TestGetSupportedTypes tests the retrieval of supported unit types.
-func TestGetSupportedTypes(t *testing.T) {
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
-
-	t.Run("returns built-in types", func(t *testing.T) {
-		types := registry.GetSupportedTypes()
-		sort.Strings(types) // For consistent comparison.
-
-		expected := []string{"answerer", "arithmetic_mean", "ExactMatch", "FuzzyMatch", "max_pool", "median_pool", "score_judge", "verification"}
-		sort.Strings(expected)
-
-		assert.Equal(t, expected, types)
-	})
-
-	t.Run("includes custom registered types", func(t *testing.T) {
-		// Register a custom type.
-		customFactory := func(id string, config map[string]any) (ports.Unit, error) {
-			return &testMockUnit{name: id}, nil
-		}
-		err := registry.RegisterUnitFactory("custom_type", customFactory)
-		require.NoError(t, err)
-
-		types := registry.GetSupportedTypes()
-		assert.Contains(t, types, "custom_type")
-		assert.Len(t, types, 9) // 8 built-in + 1 custom.
-	})
-}
-
-// TestSetLLMClient tests setting the LLM client on the registry.
-func TestSetLLMClient(t *testing.T) {
-	initialClient := &mockLLMClient{model: "initial-model"}
-	registry := NewDefaultUnitRegistry(initialClient)
-
-	t.Run("updates LLM client", func(t *testing.T) {
-		// Verify the initial client.
-		assert.Equal(t, initialClient, registry.GetLLMClient())
-
-		// Update to a new client.
-		newClient := &mockLLMClient{model: "new-model"}
-		registry.SetLLMClient(newClient)
-
-		// Verify that the client was updated.
-		assert.Equal(t, newClient, registry.GetLLMClient())
-	})
-
-	t.Run("re-registers built-in factories", func(t *testing.T) {
-		// Register a custom factory.
-		customFactory := func(id string, config map[string]any) (ports.Unit, error) {
-			return &testMockUnit{name: id}, nil
-		}
-		err := registry.RegisterUnitFactory("custom", customFactory)
-		require.NoError(t, err)
-
-		// Update the LLM client.
-		newClient := &mockLLMClient{model: "updated-model"}
-		registry.SetLLMClient(newClient)
-
-		// Verify that the custom factory is still registered.
-		types := registry.GetSupportedTypes()
-		assert.Contains(t, types, "custom")
-
-		// Verify that the built-in factories still work with the new client.
-		unit, err := registry.CreateUnit("answerer", "test_answerer", map[string]any{
-			"num_answers":     1,
-			"prompt":          "Test: {{.Question}}",
-			"max_tokens":      100,
-			"timeout":         "30s",
-			"max_concurrency": 1,
+		assert.Panics(t, func() {
+			registry.Register("custom", customFactory)
 		})
-		require.NoError(t, err)
+	})
+}
+
+func TestRegistry_CreateUnit(t *testing.T) {
+	mockClient := &mockLLMClient{model: "test-model"}
+
+	t.Run("creates unit with registered factory", func(t *testing.T) {
+		registry := NewRegistry(mockClient)
+
+		customFactory := func(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+			assert.Equal(t, mockClient, llm)
+			return &testMockUnit{name: id}, nil
+		}
+
+		registry.Register("custom", customFactory)
+
+		unit, err := registry.CreateUnit("custom", "test-unit", map[string]any{})
+		assert.NoError(t, err)
+		assert.NotNil(t, unit)
+		assert.Equal(t, "test-unit", unit.Name())
+	})
+
+	t.Run("returns error for unknown unit type", func(t *testing.T) {
+		registry := NewRegistry(mockClient)
+
+		unit, err := registry.CreateUnit("unknown", "test-unit", map[string]any{})
+		assert.Error(t, err)
+		assert.Nil(t, unit)
+		assert.Contains(t, err.Error(), "unknown unit type")
+	})
+
+	t.Run("returns error for empty ID", func(t *testing.T) {
+		registry := NewRegistry(mockClient)
+
+		customFactory := func(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+			return &testMockUnit{name: id}, nil
+		}
+
+		registry.Register("custom", customFactory)
+
+		unit, err := registry.CreateUnit("custom", "", map[string]any{})
+		assert.Error(t, err)
+		assert.Nil(t, unit)
+		assert.Contains(t, err.Error(), "unit ID cannot be empty")
+	})
+
+	t.Run("passes configuration to factory", func(t *testing.T) {
+		registry := NewRegistry(mockClient)
+
+		expectedConfig := map[string]any{
+			"key1": "value1",
+			"key2": 42,
+		}
+
+		customFactory := func(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+			assert.Equal(t, expectedConfig, config)
+			return &testMockUnit{name: id}, nil
+		}
+
+		registry.Register("custom", customFactory)
+
+		unit, err := registry.CreateUnit("custom", "test-unit", expectedConfig)
+		assert.NoError(t, err)
 		assert.NotNil(t, unit)
 	})
 
-	t.Run("handles nil client", func(t *testing.T) {
-		registry.SetLLMClient(nil)
-		assert.Nil(t, registry.GetLLMClient())
+	t.Run("factory error is propagated", func(t *testing.T) {
+		registry := NewRegistry(mockClient)
 
-		// The registry should still function.
-		types := registry.GetSupportedTypes()
-		assert.NotEmpty(t, types)
+		expectedErr := fmt.Errorf("factory error")
+		customFactory := func(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+			return nil, expectedErr
+		}
+
+		registry.Register("custom", customFactory)
+
+		unit, err := registry.CreateUnit("custom", "test-unit", map[string]any{})
+		assert.Error(t, err)
+		assert.Nil(t, unit)
+		assert.Equal(t, expectedErr, err)
 	})
 }
 
-// TestThreadSafety_CreateUnit tests the thread safety of the CreateUnit method.
-func TestThreadSafety_CreateUnit(t *testing.T) {
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
+func TestRegistry_GetSupportedTypes(t *testing.T) {
+	t.Run("returns all registered types", func(t *testing.T) {
+		registry := NewRegistry(nil)
 
-	t.Run("concurrent CreateUnit calls", func(t *testing.T) {
-		const numGoroutines = 10
+		// Register multiple factories
+		for i := 0; i < 5; i++ {
+			unitType := fmt.Sprintf("type%d", i)
+			registry.Register(unitType, func(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+				return &testMockUnit{name: id}, nil
+			})
+		}
+
+		supportedTypes := registry.GetSupportedTypes()
+		assert.Len(t, supportedTypes, 5)
+
+		// Check all types are present (order not guaranteed)
+		for i := 0; i < 5; i++ {
+			assert.Contains(t, supportedTypes, fmt.Sprintf("type%d", i))
+		}
+	})
+
+	t.Run("returns empty for no registered types", func(t *testing.T) {
+		registry := NewRegistry(nil)
+		supportedTypes := registry.GetSupportedTypes()
+		assert.Empty(t, supportedTypes)
+	})
+}
+
+func TestRegistry_ThreadSafety(t *testing.T) {
+	t.Run("concurrent registration and creation", func(t *testing.T) {
+		registry := NewRegistry(&mockLLMClient{model: "test"})
+
 		var wg sync.WaitGroup
-		wg.Add(numGoroutines)
+		numGoroutines := 10
 
-		errors := make(chan error, numGoroutines)
-
-		for i := range numGoroutines {
-			go func(id int) {
+		// Register different unit types concurrently
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
 				defer wg.Done()
 
-				unit, err := registry.CreateUnit("max_pool", fmt.Sprintf("unit_%d", id), map[string]any{
-					"tie_breaker": "first",
+				unitType := fmt.Sprintf("type%d", idx)
+				factory := func(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+					return &testMockUnit{name: id}, nil
+				}
+
+				// This should not panic for unique types
+				require.NotPanics(t, func() {
+					registry.Register(unitType, factory)
 				})
-
-				if err != nil {
-					errors <- err
-					return
-				}
-
-				if unit.Name() != fmt.Sprintf("unit_%d", id) {
-					errors <- fmt.Errorf("unexpected unit name: %s", unit.Name())
-				}
 			}(i)
 		}
 
 		wg.Wait()
-		close(errors)
 
-		// Check for errors.
-		for err := range errors {
-			t.Errorf("Concurrent error: %v", err)
-		}
-	})
-}
-
-// TestThreadSafety_RegisterAndCreate tests the thread safety of concurrent
-// registration and creation of units.
-func TestThreadSafety_RegisterAndCreate(t *testing.T) {
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
-
-	t.Run("concurrent register and create", func(t *testing.T) {
-		const numOperations = 20
-		var wg sync.WaitGroup
-		wg.Add(numOperations)
-
-		errors := make(chan error, numOperations)
-
-		for i := range numOperations {
-			go func(id int) {
+		// Create units concurrently
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
 				defer wg.Done()
 
-				if id%2 == 0 {
-					// Register a new factory.
-					factory := func(unitID string, config map[string]any) (ports.Unit, error) {
-						return &testMockUnit{name: unitID}, nil
-					}
-					err := registry.RegisterUnitFactory(fmt.Sprintf("type_%d", id), factory)
-					if err != nil {
-						errors <- err
-					}
-				} else {
-					// Create a unit.
-					unitType := "max_pool"
-					if id > 10 {
-						unitType = fmt.Sprintf("type_%d", id-1) // Use a previously registered type.
-					}
+				unitType := fmt.Sprintf("type%d", idx)
+				unitID := fmt.Sprintf("unit%d", idx)
 
-					_, err := registry.CreateUnit(unitType, fmt.Sprintf("unit_%d", id), nil)
-					if err != nil && !isExpectedError(err) {
-						errors <- err
-					}
-				}
+				unit, err := registry.CreateUnit(unitType, unitID, map[string]any{})
+				assert.NoError(t, err)
+				assert.NotNil(t, unit)
+				assert.Equal(t, unitID, unit.Name())
 			}(i)
 		}
 
 		wg.Wait()
-		close(errors)
 
-		// Check for unexpected errors.
-		for err := range errors {
-			t.Errorf("Concurrent error: %v", err)
-		}
+		// Verify all types are registered
+		supportedTypes := registry.GetSupportedTypes()
+		assert.Len(t, supportedTypes, numGoroutines)
 	})
-}
-
-// TestThreadSafety_SetLLMClient tests the thread safety of setting the LLM client
-// while other operations are in progress.
-func TestThreadSafety_SetLLMClient(t *testing.T) {
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
-
-	t.Run("concurrent SetLLMClient and CreateUnit", func(t *testing.T) {
-		const numOperations = 20
-		var wg sync.WaitGroup
-		wg.Add(numOperations)
-
-		errs := make(chan error, numOperations)
-
-		for i := range numOperations {
-			go func(id int) {
-				defer wg.Done()
-
-				switch id % 3 {
-				case 0:
-					// Update the LLM client.
-					newClient := &mockLLMClient{model: fmt.Sprintf("model-%d", id)}
-					registry.SetLLMClient(newClient)
-				case 1:
-					// Get the LLM client.
-					client := registry.GetLLMClient()
-					if client == nil {
-						errs <- errors.New("GetLLMClient returned nil")
-					}
-				default:
-					// Create a unit.
-					unit, err := registry.CreateUnit("answerer", fmt.Sprintf("unit_%d", id), map[string]any{
-						"num_answers":     1,
-						"prompt":          "Test: {{.Question}}",
-						"max_tokens":      100,
-						"timeout":         "30s",
-						"max_concurrency": 1,
-					})
-					if err != nil {
-						errs <- err
-						return
-					}
-					if unit.Name() != fmt.Sprintf("unit_%d", id) {
-						errs <- fmt.Errorf("unexpected unit name: %s", unit.Name())
-					}
-				}
-			}(i)
-		}
-
-		wg.Wait()
-		close(errs)
-
-		// Check for errors.
-		for err := range errs {
-			t.Errorf("Concurrent error: %v", err)
-		}
-	})
-}
-
-// TestRaceConditions should be run with the -race flag to detect race conditions.
-func TestRaceConditions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping race condition test in short mode")
-	}
-
-	mockClient := &mockLLMClient{model: "test-model"}
-	registry := NewDefaultUnitRegistry(mockClient)
-
-	t.Run("stress test all operations", func(t *testing.T) {
-		const numGoroutines = 50
-		done := make(chan bool)
-
-		// Start multiple goroutines performing different operations.
-		for i := range numGoroutines {
-			go func(id int) {
-				defer func() { done <- true }()
-
-				operation := id % 5
-				switch operation {
-				case 0:
-					// Register a factory.
-					factory := func(unitID string, config map[string]any) (ports.Unit, error) {
-						return &testMockUnit{name: unitID}, nil
-					}
-					_ = registry.RegisterUnitFactory(fmt.Sprintf("stress_%d", id), factory)
-
-				case 1:
-					// Create a unit.
-					_, _ = registry.CreateUnit("max_pool", fmt.Sprintf("stress_unit_%d", id), nil)
-
-				case 2:
-					// Get supported types.
-					_ = registry.GetSupportedTypes()
-
-				case 3:
-					// Set the LLM client.
-					newClient := &mockLLMClient{model: fmt.Sprintf("stress_model_%d", id)}
-					registry.SetLLMClient(newClient)
-
-				case 4:
-					// Get the LLM client.
-					_ = registry.GetLLMClient()
-				}
-
-				// Add some randomness to the execution order.
-				time.Sleep(time.Microsecond * time.Duration(id))
-			}(i)
-		}
-
-		// Wait for all goroutines to complete.
-		for range numGoroutines {
-			<-done
-		}
-	})
-}
-
-// isExpectedError determines if an error is expected in concurrent scenarios.
-func isExpectedError(err error) bool {
-	// In concurrent scenarios, "unsupported unit type" is expected
-	// if we try to use a type before it is registered.
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "unsupported unit type") ||
-		strings.Contains(errStr, "failed to create unit")
 }

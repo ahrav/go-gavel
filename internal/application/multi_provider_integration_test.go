@@ -27,29 +27,18 @@ func TestMultiProviderIntegration(t *testing.T) {
 	// Set up mock API keys for testing.
 	os.Setenv("OPENAI_API_KEY", "test-openai-key")
 	os.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
-
-	// Create a temporary credentials file for Google.
-	tmpFile, err := os.CreateTemp("", "test-creds-*.json")
-	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
-
-	// Write minimal JSON content to make it a valid file.
-	_, err = tmpFile.WriteString(`{"type": "service_account", "project_id": "test"}`)
-	require.NoError(t, err)
-
-	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", tmpFile.Name())
+	os.Setenv("GOOGLE_API_KEY", "test-google-api-key")
 	defer func() {
 		os.Unsetenv("OPENAI_API_KEY")
 		os.Unsetenv("ANTHROPIC_API_KEY")
-		os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
+		os.Unsetenv("GOOGLE_API_KEY")
 	}()
 
 	t.Run("creates provider registry with multiple providers", func(t *testing.T) {
 		// Create mock clients with specific models.
 		mockOpenAI := testutils.NewMockLLMClient("gpt-4")
 		mockAnthropic := testutils.NewMockLLMClient("claude-3-sonnet")
-		mockGoogle := testutils.NewMockLLMClient("gemini-pro")
+		mockGoogle := testutils.NewMockLLMClient("gemini-1.5-pro")
 
 		// Register mock provider factories before creating the registry.
 		llm.RegisterProviderFactory("openai", func(cfg llm.ClientConfig) (llm.CoreLLM, error) {
@@ -86,10 +75,10 @@ func TestMultiProviderIntegration(t *testing.T) {
 		assert.NotNil(t, anthropicClient)
 		assert.Equal(t, "claude-3-sonnet", anthropicClient.GetModel())
 
-		googleClient, err := registry.GetClient("google/gemini-pro")
+		googleClient, err := registry.GetClient("google/gemini-1.5-pro")
 		require.NoError(t, err)
 		assert.NotNil(t, googleClient)
-		assert.Equal(t, "gemini-pro", googleClient.GetModel())
+		assert.Equal(t, "gemini-1.5-pro", googleClient.GetModel())
 	})
 
 	t.Run("multiple judges with different providers", func(t *testing.T) {
@@ -165,11 +154,11 @@ func TestMultiProviderIntegration(t *testing.T) {
 		// Temporarily unset API keys.
 		oldOpenAI := os.Getenv("OPENAI_API_KEY")
 		oldAnthropic := os.Getenv("ANTHROPIC_API_KEY")
-		oldGoogle := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+		oldGoogle := os.Getenv("GOOGLE_API_KEY")
 
 		os.Unsetenv("OPENAI_API_KEY")
 		os.Unsetenv("ANTHROPIC_API_KEY")
-		os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
+		os.Unsetenv("GOOGLE_API_KEY")
 
 		defer func() {
 			if oldOpenAI != "" {
@@ -179,7 +168,7 @@ func TestMultiProviderIntegration(t *testing.T) {
 				os.Setenv("ANTHROPIC_API_KEY", oldAnthropic)
 			}
 			if oldGoogle != "" {
-				os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", oldGoogle)
+				os.Setenv("GOOGLE_API_KEY", oldGoogle)
 			}
 		}()
 
@@ -240,8 +229,9 @@ func TestMultiProviderIntegration(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// Create a unit registry and graph loader.
-		unitRegistry := NewDefaultUnitRegistry(mockOpenAI)
+		// Create a unit registry and register builtin units
+		unitRegistry := NewRegistry(mockOpenAI)
+		unitRegistry.RegisterBuiltinUnits()
 		graphLoader, err := NewGraphLoader(unitRegistry, registry)
 		require.NoError(t, err)
 
@@ -278,7 +268,7 @@ units:
       min_confidence: 0.8
   - id: judge3
     type: score_judge
-    model: google/gemini-pro
+    model: google/gemini-1.5-pro
     budget:
       max_tokens: 1000
       max_calls: 10
@@ -416,7 +406,7 @@ units:
 		// Register the clients.
 		err = registry.RegisterClient("openai", llm.ClientConfig{
 			APIKey: "test-key",
-			Model:  "failing-model",
+			Model:  "gpt-3.5-turbo",
 		})
 		require.NoError(t, err)
 
@@ -427,7 +417,7 @@ units:
 		require.NoError(t, err)
 
 		// Try to use the failing provider.
-		_, err = registry.GetClient("openai/failing-model")
+		_, err = registry.GetClient("openai/gpt-3.5-turbo")
 		require.NoError(t, err) // GetClient should succeed.
 
 		// Create a judge with the failing client.
@@ -483,7 +473,7 @@ func (m *mockFailingLLMClient) EstimateTokens(text string) (int, error) {
 
 // GetModel returns the model name.
 func (m *mockFailingLLMClient) GetModel() string {
-	return "failing-model"
+	return "gpt-3.5-turbo"
 }
 
 // mockFailingCoreLLMAdapter adapts mockFailingLLMClient to implement llm.CoreLLM.
@@ -610,7 +600,7 @@ graph:
         min_confidence: 0.8
     - id: google-judge
       type: score_judge
-      model: google/gemini-pro
+      model: google/gemini-1.5-pro
       budget:
         max_tokens: 1000
         max_calls: 10
@@ -632,7 +622,7 @@ graph:
 	// Verify that the model fields are parsed correctly.
 	assert.Equal(t, "openai/gpt-4", config.Graph.Units[0].Model)
 	assert.Equal(t, "anthropic/claude-3-sonnet@20240307", config.Graph.Units[1].Model)
-	assert.Equal(t, "google/gemini-pro", config.Graph.Units[2].Model)
+	assert.Equal(t, "google/gemini-1.5-pro", config.Graph.Units[2].Model)
 
 	// Verify model validation using a regex pattern.
 	modelPattern := regexp.MustCompile(`^[a-z0-9]+/[A-Za-z0-9\-_\.]+(@[A-Za-z0-9\-_\.]+)?$`)

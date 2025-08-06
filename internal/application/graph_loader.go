@@ -60,9 +60,8 @@ func NewGraphLoader(unitRegistry ports.UnitRegistry, providerRegistry *llm.Regis
 		return nil, fmt.Errorf("failed to register validators: %w", err)
 	}
 
-	if providerRegistry == nil {
-		return nil, fmt.Errorf("provider registry cannot be nil")
-	}
+	// Provider registry can be nil for graphs that only use deterministic units
+	// (e.g., exact_match, fuzzy_match, arithmetic_mean, max_pool, median_pool)
 
 	return &GraphLoader{
 		validator:        v,
@@ -402,6 +401,10 @@ func (gl *GraphLoader) createUnit(config UnitConfig) (ports.Unit, error) {
 
 	// Get the appropriate LLMClient based on the model field
 	if config.Model != "" || gl.isLLMUnit(config.Type) {
+		// Provider registry is required for units that need LLM clients.
+		if gl.providerRegistry == nil {
+			return nil, fmt.Errorf("provider registry is required for unit %q with model %q", config.ID, config.Model)
+		}
 		llmClient, err := gl.providerRegistry.GetClient(config.Model)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get LLM client for model %q: %w", config.Model, err)
@@ -515,6 +518,11 @@ func (gl *GraphLoader) validateModelProvider(model string) error {
 	// Skip validation if model is empty (will use default provider)
 	if model == "" {
 		return nil
+	}
+
+	// Skip validation if provider registry is nil (deterministic units only).
+	if gl.providerRegistry == nil {
+		return fmt.Errorf("provider registry is required for model %q", model)
 	}
 
 	// Try to get the client for the model to ensure provider is registered

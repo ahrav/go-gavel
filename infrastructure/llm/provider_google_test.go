@@ -95,30 +95,6 @@ func TestGoogleProvider_GetSetModel(t *testing.T) {
 	assert.Equal(t, GoogleDefaultModel, provider.GetModel())
 }
 
-// TestLooksLikeFilePath tests the looksLikeFilePath helper function to ensure it
-// correctly identifies strings that resemble file paths.
-func TestLooksLikeFilePath(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected bool
-	}{
-		{"api-key-string", false},
-		{"/path/to/file", true},
-		{"C:\\path\\to\\file", true},
-		{"credentials.json", true},
-		{"sk-1234567890abcdef", false},
-		{"./relative/path", true},
-		{"../parent/path", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := looksLikeFilePath(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 // TestBuildGenerateContentRequest tests the construction of a content generation
 // request. It verifies that the request is correctly assembled with and without
 // a system prompt.

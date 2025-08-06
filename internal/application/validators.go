@@ -21,6 +21,9 @@ func ValidateUnitParameters(unitType string, params yaml.Node) error {
 		return fmt.Errorf("failed to decode parameters: %w", err)
 	}
 
+	// TODO: Come back to this, this feels like something we will get tripped up
+	// on for new units for oss contributors.
+
 	switch unitType {
 	case "score_judge":
 		return validateScoreJudgeParams(paramMap)
@@ -30,6 +33,10 @@ func ValidateUnitParameters(unitType string, params yaml.Node) error {
 		return validateVerificationParams(paramMap)
 	case "arithmetic_mean", "max_pool", "median_pool":
 		return validatePoolParams(paramMap)
+	case "exact_match":
+		return validateExactMatchParams(paramMap)
+	case "fuzzy_match":
+		return validateFuzzyMatchParams(paramMap)
 	case "custom":
 		// Custom units have flexible validation
 		return nil
@@ -278,5 +285,54 @@ func validateVerificationParams(params map[string]any) error {
 func validatePoolParams(params map[string]any) error {
 	// Pool units typically don't have required parameters
 	// They work with scores from previous units
+	return nil
+}
+
+// validateExactMatchParams validates parameters for exact match units.
+func validateExactMatchParams(params map[string]any) error {
+	// Exact match units don't have required parameters.
+	if caseSensitive, ok := params["case_sensitive"]; ok {
+		if _, ok := caseSensitive.(bool); !ok {
+			return fmt.Errorf("case_sensitive must be a boolean")
+		}
+	}
+	if trimWhitespace, ok := params["trim_whitespace"]; ok {
+		if _, ok := trimWhitespace.(bool); !ok {
+			return fmt.Errorf("trim_whitespace must be a boolean")
+		}
+	}
+	return nil
+}
+
+// validateFuzzyMatchParams validates parameters for fuzzy match units.
+func validateFuzzyMatchParams(params map[string]any) error {
+	if algorithm, ok := params["algorithm"]; ok {
+		if alg, ok := algorithm.(string); ok {
+			if alg != "levenshtein" {
+				return fmt.Errorf("fuzzy_match only supports 'levenshtein' algorithm")
+			}
+		} else {
+			return fmt.Errorf("algorithm must be a string")
+		}
+	}
+	if threshold, ok := params["threshold"]; ok {
+		switch v := threshold.(type) {
+		case float64:
+			if v < 0 || v > 1 {
+				return fmt.Errorf("threshold must be between 0 and 1")
+			}
+		case int:
+			if v < 0 || v > 1 {
+				return fmt.Errorf("threshold must be between 0 and 1")
+			}
+		default:
+			return fmt.Errorf("threshold must be a number")
+		}
+	}
+	if caseSensitive, ok := params["case_sensitive"]; ok {
+		if _, ok := caseSensitive.(bool); !ok {
+			return fmt.Errorf("case_sensitive must be a boolean")
+		}
+	}
 	return nil
 }

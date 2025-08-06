@@ -11,8 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"google.golang.org/api/googleapi"
@@ -51,22 +49,24 @@ func newGoogleProvider(config ClientConfig) (CoreLLM, error) {
 		return nil, ErrEmptyAPIKey
 	}
 
+	if strings.Contains(config.APIKey, "/") || strings.Contains(config.APIKey, "\\") || strings.HasSuffix(config.APIKey, ".json") {
+		return nil, ErrEmptyAPIKey
+	}
+
 	model := config.Model
 	if model == "" {
 		model = GoogleDefaultModel
 	}
 
 	ctx := context.Background()
-	var client *genai.Client
-	var err error
 
-	// Configure authentication using the provided API key or service account.
-	authConfig, err := buildAuthConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to configure authentication: %w", err)
+	// Configure authentication using the provided API key.
+	clientConfig := &genai.ClientConfig{
+		APIKey:  config.APIKey,
+		Backend: genai.BackendGeminiAPI,
 	}
 
-	client, err = genai.NewClient(ctx, authConfig)
+	client, err := genai.NewClient(ctx, clientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Google client: %w", err)
 	}
@@ -198,58 +198,6 @@ func (p *googleProvider) handleError(err error) error {
 	}
 
 	return NewProviderError("google", ErrorTypeUnknown, 0, "request failed", err)
-}
-
-// buildAuthConfig creates the appropriate authentication configuration based on
-// the client settings.
-// It supports both API key and service account authentication.
-func buildAuthConfig(config ClientConfig) (*genai.ClientConfig, error) {
-	if looksLikeFilePath(config.APIKey) {
-		// Ensure the credentials file exists before proceeding.
-		if !fileExists(config.APIKey) {
-			return nil, fmt.Errorf("credentials file not found: %s", config.APIKey)
-		}
-
-		// For production environments, service account authentication should be
-		// fully implemented.
-		// This implementation provides a clear error message for guidance.
-		return nil, fmt.Errorf("service account authentication requires additional configuration. " +
-			"Please use API key authentication or set GOOGLE_APPLICATION_CREDENTIALS environment variable")
-	}
-
-	return &genai.ClientConfig{
-		APIKey:  config.APIKey,
-		Backend: genai.BackendGeminiAPI,
-	}, nil
-}
-
-// looksLikeFilePath checks if a string appears to be a file path.
-// It performs checks for absolute paths, relative paths, and common credential
-// file extensions.
-func looksLikeFilePath(s string) bool {
-	if filepath.IsAbs(s) {
-		return true
-	}
-
-	if strings.Contains(s, "/") || strings.Contains(s, "\\") {
-		return true
-	}
-
-	lower := strings.ToLower(s)
-	if strings.HasSuffix(lower, ".json") ||
-		strings.HasSuffix(lower, ".p12") ||
-		strings.HasSuffix(lower, ".pem") ||
-		strings.Contains(lower, "credentials") {
-		return true
-	}
-
-	return false
-}
-
-// fileExists checks if a file exists at the given path.
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 // isContextError checks if an error is a context-related error, such as a

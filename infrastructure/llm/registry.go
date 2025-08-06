@@ -20,12 +20,13 @@
 //	    Providers: llm.DefaultProviders,
 //	}
 //	registry := llm.NewRegistry(config)
-//	client, err := registry.GetClient("")
+//	client, err := registry.GetDefaultClient()
 //
 // Client Retrieval:
 //
 //	client, err := registry.GetClient("openai/gpt-4")
-//	client, err := registry.GetClient("") // Uses default provider
+//	client, err := registry.GetDefaultClient() // Uses default provider
+//	client, err := registry.GetClient("openai") // Uses default model for provider
 //
 // Custom Registration:
 //
@@ -75,6 +76,9 @@ type ProviderConfig struct {
 	EnvVar string
 	// DefaultModel specifies the default model to use if not specified
 	DefaultModel string
+	// SupportedModels lists all models supported by this provider
+	// If empty, no validation is performed (allows any model)
+	SupportedModels []string
 	// BaseURL overrides the default API endpoint for the provider
 	BaseURL string
 	// Middleware specifies provider-specific middleware
@@ -101,17 +105,49 @@ var DefaultProviders = map[string]ProviderConfig{
 	"openai": {
 		Type:         "openai",
 		EnvVar:       "OPENAI_API_KEY",
-		DefaultModel: "gpt-4",
+		DefaultModel: "gpt-4.1",
+		SupportedModels: []string{
+			// GPT-4.1 series (latest flagship)
+			"gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+			// GPT-4o series (omni models)
+			"gpt-4o", "gpt-4o-mini", "gpt-4o-audio",
+			// GPT-4 series (classic)
+			"gpt-4", "gpt-4-turbo",
+			// GPT-3.5 series (legacy)
+			"gpt-3.5-turbo", "gpt-3.5-turbo-instruct",
+			// Reasoning models
+			"o4-mini", "o3", "o3-mini", "o1", "o1-mini",
+			// Experimental models
+			"gpt-4.5",
+		},
 	},
 	"anthropic": {
 		Type:         "anthropic",
 		EnvVar:       "ANTHROPIC_API_KEY",
-		DefaultModel: "claude-3-sonnet",
+		DefaultModel: "claude-4-sonnet",
+		SupportedModels: []string{
+			// Claude 4 series (latest flagship)
+			"claude-4-opus", "claude-4-sonnet", "claude-4.1-opus",
+			// Claude 3.7 series
+			"claude-3.7-sonnet",
+			// Claude 3.5 series
+			"claude-3.5-sonnet", "claude-3.5-haiku",
+			// Claude 3 series (legacy)
+			"claude-3-haiku", "claude-3-sonnet", "claude-3-opus",
+		},
 	},
 	"google": {
 		Type:         "google",
-		EnvVar:       "GOOGLE_APPLICATION_CREDENTIALS",
-		DefaultModel: "gemini-pro",
+		EnvVar:       "GOOGLE_API_KEY",
+		DefaultModel: "gemini-2.5-flash",
+		SupportedModels: []string{
+			// Gemini 2.5 series (latest flagship)
+			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+			// Gemini 2.0 series
+			"gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.0-pro-experimental",
+			// Gemini 1.5 series (legacy but supported)
+			"gemini-1.5-pro", "gemini-1.5-flash",
+		},
 	},
 }
 
@@ -137,15 +173,31 @@ func NewRegistry(config RegistryConfig) (*Registry, error) {
 	}, nil
 }
 
+// GetDefaultClient returns a client for the default provider.
+// This method provides explicit access to the default provider client,
+// making intent clear and avoiding the ambiguity of empty string parameters.
+func (r *Registry) GetDefaultClient() (ports.LLMClient, error) {
+	providerConfig, exists := r.providers[r.defaultProvider]
+	if !exists {
+		return nil, fmt.Errorf("default provider %q not found in configuration", r.defaultProvider)
+	}
+
+	return r.GetClient(r.defaultProvider + "/" + providerConfig.DefaultModel)
+}
+
 // GetClient retrieves a client by provider name or model string.
 // Supports multiple formats:
-//   - "" (empty): Returns default provider client
 //   - "provider": Returns client for specified provider with default model
 //   - "provider/model": Returns client for specified provider and model
 //
+// Empty strings are not allowed - use GetDefaultClient() for default provider.
 // The method creates clients lazily on first request and caches them for reuse.
 // Each unique provider/model combination gets its own client instance.
 func (r *Registry) GetClient(spec string) (ports.LLMClient, error) {
+	if spec == "" {
+		return nil, fmt.Errorf("provider specification cannot be empty; use GetDefaultClient() for default provider")
+	}
+
 	provider, model := r.parseSpec(spec)
 
 	key := r.buildCacheKey(provider, model)
@@ -210,18 +262,11 @@ func (r *Registry) RegisterClient(name string, config ClientConfig) error {
 
 // parseSpec extracts provider name and model from a specification string.
 // Supports formats:
-//   - "" -> (defaultProvider, defaultModel)
 //   - "provider" -> (provider, defaultModel)
 //   - "provider/model" -> (provider, model)
+//
+// Empty strings are not supported - caller should validate input.
 func (r *Registry) parseSpec(spec string) (provider, model string) {
-	if spec == "" {
-		provider = r.defaultProvider
-		if providerConfig, ok := r.providers[provider]; ok {
-			model = providerConfig.DefaultModel
-		}
-		return
-	}
-
 	parts := strings.SplitN(spec, "/", 2)
 	provider = parts[0]
 
@@ -244,11 +289,18 @@ func (r *Registry) buildCacheKey(provider, model string) string {
 }
 
 // createClient creates a new client instance for the given provider and model.
-// It handles environment variable loading, configuration merging, and client initialization.
+// It handles environment variable loading, configuration merging, model validation, and client initialization.
 func (r *Registry) createClient(provider, model string) (ports.LLMClient, error) {
 	providerConfig, exists := r.providers[provider]
 	if !exists {
 		return nil, fmt.Errorf("unknown provider %q", provider)
+	}
+
+	if len(providerConfig.SupportedModels) > 0 {
+		if !r.isModelSupported(model, providerConfig.SupportedModels) {
+			return nil, fmt.Errorf("model %q is not supported by provider %q. Supported models: %v",
+				model, provider, providerConfig.SupportedModels)
+		}
 	}
 
 	apiKey := os.Getenv(providerConfig.EnvVar)
@@ -320,8 +372,6 @@ func (r *Registry) InitializeProviders() error {
 
 		key := r.buildCacheKey(providerName, providerConfig.DefaultModel)
 		r.clients[key] = client
-
-		r.clients[providerName] = client
 	}
 
 	if !foundDefault {
@@ -368,4 +418,14 @@ func (r *Registry) SetDefaultTimeout(timeout time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.defaultTimeout = timeout
+}
+
+// isModelSupported checks if a model is in the supported models list.
+func (r *Registry) isModelSupported(model string, supportedModels []string) bool {
+	for _, supportedModel := range supportedModels {
+		if model == supportedModel {
+			return true
+		}
+	}
+	return false
 }
