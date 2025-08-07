@@ -218,18 +218,22 @@ func DefaultMaxPoolConfig() MaxPoolConfig {
 	}
 }
 
-// CreateMaxPoolUnit is a factory function that creates a MaxPoolUnit from a
-// configuration map, for use with the UnitRegistry.
-func CreateMaxPoolUnit(id string, config map[string]any) (*MaxPoolUnit, error) {
-	poolConfig := DefaultMaxPoolConfig()
-	if val, ok := config["tie_breaker"].(string); ok {
-		poolConfig.TieBreaker = TieBreaker(val)
+// NewMaxPoolFromConfig creates a MaxPoolUnit from a configuration map.
+// This is the boundary adapter for YAML/JSON configuration.
+// Max pool doesn't require an LLM client (deterministic aggregation).
+func NewMaxPoolFromConfig(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+	// llm is ignored - max pool is deterministic.
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
-	if val, ok := config["min_score"].(float64); ok {
-		poolConfig.MinScore = val
+
+	// Start with defaults, then overlay user config.
+	cfg := DefaultMaxPoolConfig()
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if val, ok := config["require_all_scores"].(bool); ok {
-		poolConfig.RequireAllScores = val
-	}
-	return NewMaxPoolUnit(id, poolConfig)
+
+	return NewMaxPoolUnit(id, cfg)
 }

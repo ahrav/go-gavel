@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"text/template"
 	"time"
 
@@ -147,7 +146,7 @@ func NewAnswererUnit(
 		return nil, fmt.Errorf("%w: %v", ErrConfigValidation, err)
 	}
 
-	tmpl, err := template.New("prompt").Parse(config.Prompt)
+	tmpl, err := template.New("prompt").Funcs(GetTemplateFuncMap()).Parse(config.Prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse prompt template: %w", err)
 	}
@@ -222,7 +221,6 @@ func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(au.config.MaxConcurrency)
 
-	// Each goroutine generates one answer with unique ID and error context.
 	for i := 0; i < au.config.NumAnswers; i++ {
 		g.Go(func() error {
 			response, err := au.llmClient.Complete(ctx, prompt, options)
@@ -304,7 +302,7 @@ func (au *AnswererUnit) UnmarshalParameters(params yaml.Node) (*AnswererUnit, er
 		return nil, fmt.Errorf("%w: %v", ErrConfigValidation, err)
 	}
 
-	tmpl, err := template.New("prompt").Parse(config.Prompt)
+	tmpl, err := template.New("prompt").Funcs(GetTemplateFuncMap()).Parse(config.Prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse prompt template: %w", err)
 	}
@@ -330,88 +328,28 @@ func defaultAnswererConfig() AnswererConfig {
 	}
 }
 
-// CreateAnswererUnit creates an AnswererUnit from a configuration map
-// following the UnitFactory pattern for dynamic unit instantiation.
-//
-// Required configuration keys:
-//   - "llm_client" (ports.LLMClient): LLM service implementation
-//   - "num_answers" (int): Number of answers to generate
-//   - "prompt" (string): Go template with {{.Question}} placeholder
-//   - "max_tokens" (int): Token limit per answer
-//   - "timeout" (string|int): Timeout duration or seconds
-//   - "max_concurrency" (int): Concurrent request limit
-//
-// Optional configuration keys:
-//   - "temperature" (float64): Generation randomness (default: 0.7)
-//
-// Returns an error if required keys are missing, type assertions fail,
-// or unit creation fails during validation.
-func CreateAnswererUnit(id string, config map[string]any) (*AnswererUnit, error) {
-	llmClient, ok := config["llm_client"].(ports.LLMClient)
-	if !ok {
-		return nil, fmt.Errorf("llm_client is required and must implement ports.LLMClient")
+// NewAnswererFromConfig creates an AnswererUnit from a configuration map.
+// This is the boundary adapter that converts untyped configuration to typed.
+// It's only used by the registry when creating units from YAML/JSON config.
+func NewAnswererFromConfig(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+	if llm == nil {
+		return nil, ErrLLMClientNil
 	}
 
-	requiredFields := []string{"num_answers", "prompt", "max_tokens", "timeout", "max_concurrency"}
-	for _, field := range requiredFields {
-		if _, ok := config[field]; !ok {
-			return nil, fmt.Errorf("failed to unmarshal answerer config: missing required field '%s'", field)
-		}
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
-	answererConfig := defaultAnswererConfig()
-
-	if val, ok := config["num_answers"]; ok {
-		if i, err := strconv.Atoi(fmt.Sprintf("%v", val)); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal answerer config: invalid num_answers format")
-		} else {
-			answererConfig.NumAnswers = i
-		}
+	// Start with defaults, then overlay user config.
+	cfg := defaultAnswererConfig()
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	if val, ok := config["prompt"].(string); ok {
-		answererConfig.Prompt = val
-	} else {
-		return nil, fmt.Errorf("failed to unmarshal answerer config: prompt must be a string")
+	if err := answererValidator.Struct(cfg); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
 	}
 
-	if val, ok := config["temperature"]; ok {
-		if f, err := strconv.ParseFloat(fmt.Sprintf("%v", val), 64); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal answerer config: invalid temperature format")
-		} else {
-			answererConfig.Temperature = f
-		}
-	}
-
-	if val, ok := config["max_tokens"]; ok {
-		if i, err := strconv.Atoi(fmt.Sprintf("%v", val)); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal answerer config: invalid max_tokens format")
-		} else {
-			answererConfig.MaxTokens = i
-		}
-	}
-
-	if val, ok := config["timeout"]; ok {
-		if str, ok := val.(string); ok {
-			if d, err := time.ParseDuration(str); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal answerer config: invalid timeout duration format")
-			} else {
-				answererConfig.Timeout = d
-			}
-		} else if num, ok := val.(int); ok {
-			answererConfig.Timeout = time.Duration(num) * time.Second
-		} else {
-			return nil, fmt.Errorf("failed to unmarshal answerer config: timeout must be a string or integer")
-		}
-	}
-
-	if val, ok := config["max_concurrency"]; ok {
-		if i, err := strconv.Atoi(fmt.Sprintf("%v", val)); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal answerer config: invalid max_concurrency format")
-		} else {
-			answererConfig.MaxConcurrency = i
-		}
-	}
-
-	return NewAnswererUnit(id, llmClient, answererConfig)
+	return NewAnswererUnit(id, llm, cfg)
 }

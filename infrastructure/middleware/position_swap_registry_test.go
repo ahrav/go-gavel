@@ -2,47 +2,60 @@
 package middleware
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ahrav/go-gavel/internal/application"
+	"github.com/ahrav/go-gavel/internal/domain"
 	"github.com/ahrav/go-gavel/internal/testutils"
 )
 
-// TestPositionSwapMiddleware_RegistryIntegration tests that the PositionSwap middleware
-// can be successfully registered with and created by the UnitRegistry.
-func TestPositionSwapMiddleware_RegistryIntegration(t *testing.T) {
+// mockPosSwapUnit implements the ports.Unit interface for testing.
+type mockPosSwapUnit struct {
+	name string
+}
+
+func (m *mockPosSwapUnit) Name() string { return m.name }
+
+func (m *mockPosSwapUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
+	// Add mock judge scores for the PositionSwap middleware to combine
+	answers, _ := domain.Get(state, domain.KeyAnswers)
+	judgeScores := make([]domain.JudgeSummary, len(answers))
+	for i := range answers {
+		judgeScores[i] = domain.JudgeSummary{
+			Score:      0.8, // Mock score
+			Confidence: 0.9,
+			Reasoning:  "Mock reasoning",
+		}
+	}
+
+	// Add judge scores and mark execution
+	result := domain.With(state, domain.KeyJudgeScores, judgeScores)
+	return domain.With(result, domain.NewKey[bool]("executed_"+m.name), true), nil
+}
+
+func (m *mockPosSwapUnit) Validate() error { return nil }
+
+// TestPositionSwapMiddleware_DirectCreation tests that the PositionSwap middleware
+// can be created directly with our new simplified registry pattern.
+func TestPositionSwapMiddleware_DirectCreation(t *testing.T) {
 	// Create a properly configured mock LLM client for the registry.
 	mockLLMClient := testutils.NewMockLLMClient("gpt-4")
 
-	// Create a new unit registry.
-	registry := application.NewDefaultUnitRegistry(mockLLMClient)
-
-	// Register the PositionSwap middleware factory with the registry.
-	err := RegisterPositionSwapMiddleware(registry)
-	require.NoError(t, err, "middleware registration should succeed")
-
-	// Verify that position_swap_wrapper is now a supported type.
-	supportedTypes := registry.GetSupportedTypes()
-	assert.Contains(t, supportedTypes, "position_swap_wrapper",
-		"position_swap_wrapper should be in supported types after registration")
-
-	// Define a valid configuration for creating a PositionSwap wrapper.
-	config := map[string]any{
-		"wrapped_unit": map[string]any{
-			"id":   "score_judge",
-			"type": "score_judge",
-			"params": map[string]any{
-				"model":           "gpt-4",
-				"prompt_template": "judge_correctness.tmpl",
-			},
-		},
+	// Create a mock unit to wrap
+	mockUnit := &mockPosSwapUnit{
+		name: "mock_judge",
 	}
 
-	// Create the PositionSwap wrapper through the registry.
-	unit, err := registry.CreateUnit("position_swap_wrapper", "judge_with_position_swap", config)
+	// Create the middleware directly using the factory function
+	config := map[string]any{
+		"wrapped_unit": mockUnit, // Pass the unit instance directly
+	}
+
+	// Create the PositionSwap wrapper using the factory.
+	unit, err := NewPositionSwapFromConfig("judge_with_position_swap", config, mockLLMClient)
 	require.NoError(t, err, "should create PositionSwap wrapper successfully")
 	require.NotNil(t, unit, "created unit should not be nil")
 
@@ -56,15 +69,10 @@ func TestPositionSwapMiddleware_RegistryIntegration(t *testing.T) {
 	assert.NoError(t, err, "middleware should validate successfully")
 }
 
-// TestPositionSwapMiddleware_RegistryConfigurationErrors tests the error handling
-// for invalid configurations when creating a PositionSwap wrapper from the registry.
-func TestPositionSwapMiddleware_RegistryConfigurationErrors(t *testing.T) {
+// TestPositionSwapMiddleware_ConfigurationErrors tests the error handling
+// for invalid configurations when creating a PositionSwap wrapper.
+func TestPositionSwapMiddleware_ConfigurationErrors(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("gpt-4")
-	registry := application.NewDefaultUnitRegistry(mockLLMClient)
-
-	// Register the middleware to enable testing its creation.
-	err := RegisterPositionSwapMiddleware(registry)
-	require.NoError(t, err)
 
 	tests := []struct {
 		name        string
@@ -74,48 +82,30 @@ func TestPositionSwapMiddleware_RegistryConfigurationErrors(t *testing.T) {
 		{
 			name:        "missing wrapped_unit",
 			config:      map[string]any{},
-			expectedErr: "requires 'wrapped_unit' configuration",
+			expectedErr: "requires 'wrapped_unit'",
 		},
 		{
-			name: "wrapped_unit is not a map",
+			name: "wrapped_unit is not a Unit",
 			config: map[string]any{
 				"wrapped_unit": "invalid",
 			},
-			expectedErr: "wrapped_unit must be a configuration object",
+			expectedErr: "requires 'wrapped_unit' as a Unit instance",
 		},
 		{
-			name: "wrapped_unit missing type",
-			config: map[string]any{
-				"wrapped_unit": map[string]any{
-					"id": "test",
-				},
-			},
-			expectedErr: "wrapped_unit must have a 'type' field",
-		},
-		{
-			name: "wrapped_unit missing id",
-			config: map[string]any{
-				"wrapped_unit": map[string]any{
-					"type": "score_judge",
-				},
-			},
-			expectedErr: "wrapped_unit must have an 'id' field",
-		},
-		{
-			name: "invalid wrapped unit type",
+			name: "wrapped_unit is a map (old style)",
 			config: map[string]any{
 				"wrapped_unit": map[string]any{
 					"id":   "test",
-					"type": "nonexistent_unit_type",
+					"type": "score_judge",
 				},
 			},
-			expectedErr: "unsupported unit type",
+			expectedErr: "requires 'wrapped_unit' as a Unit instance",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unit, err := registry.CreateUnit("position_swap_wrapper", "test_wrapper", tt.config)
+			unit, err := NewPositionSwapFromConfig("test_wrapper", tt.config, mockLLMClient)
 
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), tt.expectedErr)
@@ -124,35 +114,37 @@ func TestPositionSwapMiddleware_RegistryConfigurationErrors(t *testing.T) {
 	}
 }
 
-// TestPositionSwapMiddleware_RegistryDoubleRegistration tests that registering
-// the middleware factory multiple times does not cause issues.
-func TestPositionSwapMiddleware_RegistryDoubleRegistration(t *testing.T) {
-	mockLLMClient := testutils.NewMockLLMClient("gpt-4")
-	registry := application.NewDefaultUnitRegistry(mockLLMClient)
-
-	// Register the middleware twice in a row.
-	err1 := RegisterPositionSwapMiddleware(registry)
-	require.NoError(t, err1, "first registration should succeed")
-
-	err2 := RegisterPositionSwapMiddleware(registry)
-	require.NoError(t, err2, "second registration should also succeed (idempotent)")
-
-	// Verify that the type is still supported.
-	supportedTypes := registry.GetSupportedTypes()
-	assert.Contains(t, supportedTypes, "position_swap_wrapper")
-
-	// Verify that creating the wrapper still works correctly.
-	config := map[string]any{
-		"wrapped_unit": map[string]any{
-			"id":   "score_judge",
-			"type": "score_judge",
-		},
+// TestPositionSwapMiddleware_WrappedUnitExecution tests that the middleware
+// correctly wraps and executes the underlying unit.
+func TestPositionSwapMiddleware_WrappedUnitExecution(t *testing.T) {
+	// Create a mock unit to wrap
+	mockUnit := &mockPosSwapUnit{
+		name: "mock_judge",
 	}
 
-	unit, err := registry.CreateUnit("position_swap_wrapper", "test", config)
-	require.NoError(t, err)
-	require.NotNil(t, unit)
+	// Create the middleware with the mock unit
+	config := map[string]any{
+		"wrapped_unit": mockUnit,
+	}
 
-	_, ok := unit.(*PositionSwapMiddleware)
-	assert.True(t, ok, "should still create a PositionSwapMiddleware instance")
+	middleware, err := NewPositionSwapFromConfig("wrapper", config, nil)
+	require.NoError(t, err)
+
+	// Create a state with some test answers
+	state := domain.NewState()
+	answers := []domain.Answer{
+		{ID: "answer1", Content: "First answer"},
+		{ID: "answer2", Content: "Second answer"},
+	}
+	state = domain.With(state, domain.KeyAnswers, answers)
+
+	// Execute the middleware (it will execute the wrapped unit twice)
+	ctx := context.Background()
+	result, err := middleware.Execute(ctx, state)
+	require.NoError(t, err)
+
+	// Verify that the wrapped unit was executed
+	executed, ok := domain.Get(result, domain.NewKey[bool]("executed_mock_judge"))
+	assert.True(t, ok, "wrapped unit should have been executed")
+	assert.True(t, executed, "execution marker should be true")
 }

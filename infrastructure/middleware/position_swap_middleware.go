@@ -42,7 +42,11 @@ func NewPositionSwapMiddleware(next ports.Unit, name string) *PositionSwapMiddle
 func (psm *PositionSwapMiddleware) Name() string { return psm.name }
 
 // startSpan creates a new OpenTelemetry span with common attributes.
-func (psm *PositionSwapMiddleware) startSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+func (psm *PositionSwapMiddleware) startSpan(
+	ctx context.Context,
+	name string,
+	attrs ...attribute.KeyValue,
+) (context.Context, trace.Span) {
 	tracer := otel.Tracer("position-swap-middleware")
 	ctx, span := tracer.Start(ctx, name)
 

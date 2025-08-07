@@ -380,15 +380,14 @@ max_concurrency: 7
 	})
 }
 
-// TestCreateAnswererUnit tests the factory function for creating an AnswererUnit.
+// TestNewAnswererFromConfig tests the factory function for creating an AnswererUnit.
 // It ensures that the unit can be created from a map of parameters,
-// handles type conversions correctly, and applies default values for optional fields.
-func TestCreateAnswererUnit(t *testing.T) {
+// handles YAML unmarshaling correctly, and applies default values for optional fields.
+func TestNewAnswererFromConfig(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 
 	t.Run("creates unit with valid config", func(t *testing.T) {
 		config := map[string]any{
-			"llm_client":      mockLLMClient,
 			"num_answers":     3,
 			"prompt":          "Answer the question: {{.Question}}",
 			"temperature":     0.7,
@@ -397,8 +396,12 @@ func TestCreateAnswererUnit(t *testing.T) {
 			"max_concurrency": 5,
 		}
 
-		unit, err := CreateAnswererUnit("test_id", config)
+		unitPort, err := NewAnswererFromConfig("test_id", config, mockLLMClient)
 		require.NoError(t, err)
+
+		unit, ok := unitPort.(*AnswererUnit)
+		require.True(t, ok, "unit should be *AnswererUnit")
+
 		assert.Equal(t, "test_id", unit.Name())
 		assert.Equal(t, 3, unit.config.NumAnswers)
 		assert.Equal(t, "Answer the question: {{.Question}}", unit.config.Prompt)
@@ -410,26 +413,29 @@ func TestCreateAnswererUnit(t *testing.T) {
 			"prompt":      "Answer: {{.Question}}",
 		}
 
-		_, err := CreateAnswererUnit("test_id", config)
+		_, err := NewAnswererFromConfig("test_id", config, nil)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "llm_client is required")
+		assert.Contains(t, err.Error(), "LLM client cannot be nil")
 	})
 
-	t.Run("handles type conversions", func(t *testing.T) {
+	t.Run("handles YAML unmarshaling", func(t *testing.T) {
 		config := map[string]any{
-			"llm_client":      mockLLMClient,
-			"num_answers":     "3",                          // string
-			"prompt":          "Test prompt: {{.Question}}", // required
-			"temperature":     0,                            // int
-			"max_tokens":      float64(250),                 // float64
-			"timeout":         "30s",                        // duration string
-			"max_concurrency": "8",                          // string
+			"num_answers":     3,
+			"prompt":          "Test prompt: {{.Question}}",
+			"temperature":     0.5,
+			"max_tokens":      250,
+			"timeout":         "30s",
+			"max_concurrency": 8,
 		}
 
-		unit, err := CreateAnswererUnit("test_id", config)
+		unitPort, err := NewAnswererFromConfig("test_id", config, mockLLMClient)
 		require.NoError(t, err)
+
+		unit, ok := unitPort.(*AnswererUnit)
+		require.True(t, ok, "unit should be *AnswererUnit")
+
 		assert.Equal(t, 3, unit.config.NumAnswers)
-		assert.Equal(t, 0.0, unit.config.Temperature)
+		assert.Equal(t, 0.5, unit.config.Temperature)
 		assert.Equal(t, 250, unit.config.MaxTokens)
 		assert.Equal(t, 30*time.Second, unit.config.Timeout)
 		assert.Equal(t, 8, unit.config.MaxConcurrency)
@@ -437,18 +443,21 @@ func TestCreateAnswererUnit(t *testing.T) {
 
 	t.Run("uses defaults for optional fields", func(t *testing.T) {
 		config := map[string]any{
-			"llm_client":      mockLLMClient,
-			"num_answers":     2,                            // required
-			"prompt":          "Test prompt: {{.Question}}", // required
-			"max_tokens":      100,                          // required
-			"timeout":         "15s",                        // required
-			"max_concurrency": 3,                            // required
+			"num_answers":     2,
+			"prompt":          "Test prompt: {{.Question}}",
+			"max_tokens":      100,
+			"timeout":         "15s",
+			"max_concurrency": 3,
 			// temperature not provided, should use default
 		}
 
-		unit, err := CreateAnswererUnit("test_id", config)
+		unitPort, err := NewAnswererFromConfig("test_id", config, mockLLMClient)
 		require.NoError(t, err)
-		assert.Equal(t, 2, unit.config.NumAnswers)                        // provided value
+
+		unit, ok := unitPort.(*AnswererUnit)
+		require.True(t, ok, "unit should be *AnswererUnit")
+
+		assert.Equal(t, 2, unit.config.NumAnswers)
 		assert.Equal(t, 0.7, unit.config.Temperature)                     // default since not provided
 		assert.Equal(t, 100, unit.config.MaxTokens)                       // provided value
 		assert.Equal(t, 15*time.Second, unit.config.Timeout)              // provided value

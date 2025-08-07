@@ -343,7 +343,7 @@ func TestExactMatchUnit_Validate(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestCreateExactMatchUnit(t *testing.T) {
+func TestNewExactMatchFromConfig(t *testing.T) {
 	tests := []struct {
 		name      string
 		id        string
@@ -390,15 +390,18 @@ func TestCreateExactMatchUnit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unit, err := CreateExactMatchUnit(tt.id, tt.config)
+			unitPort, err := NewExactMatchFromConfig(tt.id, tt.config, nil)
 			if tt.wantError {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorMsg)
-				assert.Nil(t, unit)
+				assert.Nil(t, unitPort)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, unit)
-				assert.Equal(t, tt.id, unit.Name())
+				assert.NotNil(t, unitPort)
+				assert.Equal(t, tt.id, unitPort.Name())
+				// Type assert to access internal config
+				unit, ok := unitPort.(*ExactMatchUnit)
+				require.True(t, ok, "unit should be *ExactMatchUnit")
 				assert.Equal(t, tt.expected, unit.config)
 			}
 		})

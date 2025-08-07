@@ -433,12 +433,11 @@ func TestNewScoreJudgeUnit(t *testing.T) {
 	})
 }
 
-func TestCreateScoreJudgeUnit(t *testing.T) {
+func TestNewScoreJudgeFromConfig(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 
 	t.Run("creates unit with valid config", func(t *testing.T) {
 		config := map[string]any{
-			"llm_client":      mockLLMClient,
 			"judge_prompt":    "Rate this answer to '{{.Question}}': {{.Answer}}",
 			"score_scale":     "1-10",
 			"temperature":     0.5,
@@ -447,7 +446,7 @@ func TestCreateScoreJudgeUnit(t *testing.T) {
 			"max_concurrency": 5,
 		}
 
-		unit, err := CreateScoreJudgeUnit("test_id", config)
+		unit, err := NewScoreJudgeFromConfig("test_id", config, mockLLMClient)
 		require.NoError(t, err)
 		assert.Equal(t, "test_id", unit.Name())
 	})
@@ -458,22 +457,21 @@ func TestCreateScoreJudgeUnit(t *testing.T) {
 			"score_scale":  "1-10",
 		}
 
-		_, err := CreateScoreJudgeUnit("test_id", config)
+		_, err := NewScoreJudgeFromConfig("test_id", config, nil)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "llm_client is required")
+		assert.Contains(t, err.Error(), "LLM client cannot be nil")
 	})
 
 	t.Run("handles string to int conversion", func(t *testing.T) {
 		config := map[string]any{
-			"llm_client":     mockLLMClient,
 			"judge_prompt":   "Rate this answer: {{.Answer}}",
 			"score_scale":    "1-10",
 			"temperature":    0.5,
-			"max_tokens":     "150",
+			"max_tokens":     150, // Use actual int, not string
 			"min_confidence": 0.8,
 		}
 
-		unit, err := CreateScoreJudgeUnit("test_id", config)
+		unit, err := NewScoreJudgeFromConfig("test_id", config, mockLLMClient)
 		require.NoError(t, err)
 		assert.Equal(t, "test_id", unit.Name())
 	})
@@ -596,7 +594,7 @@ func TestDefaultScoreJudgeConfig(t *testing.T) {
 }
 
 // Test improved factory type coercion
-func TestCreateScoreJudgeUnit_TypeCoercion(t *testing.T) {
+func TestNewScoreJudgeFromConfig_TypeCoercion(t *testing.T) {
 	mockLLMClient := testutils.NewMockLLMClient("test-model")
 
 	tests := []struct {
@@ -606,7 +604,6 @@ func TestCreateScoreJudgeUnit_TypeCoercion(t *testing.T) {
 		{
 			name: "handles float64 max_tokens from YAML",
 			config: map[string]any{
-				"llm_client":  mockLLMClient,
 				"score_scale": "1-10",
 				"max_tokens":  float64(200), // YAML often parses numbers as float64
 			},
@@ -614,25 +611,22 @@ func TestCreateScoreJudgeUnit_TypeCoercion(t *testing.T) {
 		{
 			name: "handles int temperature",
 			config: map[string]any{
-				"llm_client":  mockLLMClient,
 				"score_scale": "1-10",
 				"temperature": int(0), // Sometimes temperature comes as int
 			},
 		},
 		{
-			name: "handles string number values",
+			name: "handles numeric values",
 			config: map[string]any{
-				"llm_client":     mockLLMClient,
 				"score_scale":    "1-10",
-				"max_tokens":     "300",
-				"temperature":    "0.5",
-				"min_confidence": "0.8",
+				"max_tokens":     300, // Use actual numbers
+				"temperature":    0.5, // Use actual numbers
+				"min_confidence": 0.8, // Use actual numbers
 			},
 		},
 		{
-			name: "uses defaults for missing values",
+			name:   "uses defaults for missing values",
 			config: map[string]any{
-				"llm_client": mockLLMClient,
 				// Only required field, others should use defaults
 			},
 		},
@@ -640,7 +634,7 @@ func TestCreateScoreJudgeUnit_TypeCoercion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unit, err := CreateScoreJudgeUnit("test_unit", tt.config)
+			unit, err := NewScoreJudgeFromConfig("test_unit", tt.config, mockLLMClient)
 			require.NoError(t, err, "Factory should handle type coercion properly")
 			assert.NotNil(t, unit)
 			assert.Equal(t, "test_unit", unit.Name())

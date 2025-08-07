@@ -390,18 +390,20 @@ func TestArithmeticMeanUnit_Name(t *testing.T) {
 	assert.Equal(t, "test_aggregator", unit.Name())
 }
 
-// TestCreateArithmeticMeanUnit tests the factory function for creating an ArithmeticMeanUnit.
+// TestNewArithmeticMeanFromConfig tests the factory function for creating an ArithmeticMeanUnit.
 // It verifies that the unit can be created with both default and custom configurations
 // and that it fails correctly when an empty name is provided.
-func TestCreateArithmeticMeanUnit(t *testing.T) {
+func TestNewArithmeticMeanFromConfig(t *testing.T) {
 	t.Run("creates unit with default config", func(t *testing.T) {
 		config := map[string]any{}
 
-		unit, err := CreateArithmeticMeanUnit("test_id", config)
+		unitPort, err := NewArithmeticMeanFromConfig("test_id", config, nil)
 		require.NoError(t, err)
-		assert.Equal(t, "test_id", unit.Name())
+		assert.Equal(t, "test_id", unitPort.Name())
 
 		// Verify default config was applied
+		unit, ok := unitPort.(*ArithmeticMeanUnit)
+		require.True(t, ok, "unit should be *ArithmeticMeanUnit")
 		assert.Equal(t, TieFirst, unit.config.TieBreaker)
 		assert.Equal(t, 0.0, unit.config.MinScore)
 		assert.True(t, unit.config.RequireAllScores)
@@ -414,11 +416,13 @@ func TestCreateArithmeticMeanUnit(t *testing.T) {
 			"require_all_scores": false,
 		}
 
-		unit, err := CreateArithmeticMeanUnit("test_id", config)
+		unitPort, err := NewArithmeticMeanFromConfig("test_id", config, nil)
 		require.NoError(t, err)
-		assert.Equal(t, "test_id", unit.Name())
+		assert.Equal(t, "test_id", unitPort.Name())
 
 		// Verify custom config was applied
+		unit, ok := unitPort.(*ArithmeticMeanUnit)
+		require.True(t, ok, "unit should be *ArithmeticMeanUnit")
 		assert.Equal(t, TieRandom, unit.config.TieBreaker)
 		assert.Equal(t, 0.5, unit.config.MinScore)
 		assert.False(t, unit.config.RequireAllScores)
@@ -427,7 +431,7 @@ func TestCreateArithmeticMeanUnit(t *testing.T) {
 	t.Run("fails with empty id", func(t *testing.T) {
 		config := map[string]any{}
 
-		unit, err := CreateArithmeticMeanUnit("", config)
+		unit, err := NewArithmeticMeanFromConfig("", config, nil)
 		require.Error(t, err)
 		assert.Nil(t, unit)
 		assert.Contains(t, err.Error(), "unit name cannot be empty")

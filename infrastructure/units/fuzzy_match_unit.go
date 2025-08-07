@@ -130,14 +130,12 @@ func (fmu *FuzzyMatchUnit) Execute(ctx context.Context, state domain.State) (dom
 		return state, err
 	}
 
-	// Validate reference answer length.
 	if len(referenceAnswer) > MaxStringLength {
 		err := fmt.Errorf("reference answer too long: %d bytes exceeds limit of %d", len(referenceAnswer), MaxStringLength)
 		span.RecordError(err)
 		return state, err
 	}
 
-	// Prepare the reference answer according to configuration.
 	preparedReference := fmu.prepareString(referenceAnswer)
 
 	// Compute fuzzy match scores for each answer.
@@ -145,7 +143,6 @@ func (fmu *FuzzyMatchUnit) Execute(ctx context.Context, state domain.State) (dom
 	totalScore := 0.0
 
 	for i, answer := range answers {
-		// Validate answer length.
 		if len(answer.Content) > MaxStringLength {
 			err := fmt.Errorf("answer %d too long: %d bytes exceeds limit of %d", i, len(answer.Content), MaxStringLength)
 			span.RecordError(err)
@@ -178,11 +175,9 @@ func (fmu *FuzzyMatchUnit) Execute(ctx context.Context, state domain.State) (dom
 		totalScore += score
 	}
 
-	// Calculate metrics for observability.
 	latency := time.Since(start)
 	avgScore := totalScore / float64(len(answers))
 
-	// Emit OpenTelemetry attributes as required by AC#7.
 	span.SetAttributes(
 		attribute.Float64("eval.score", avgScore),
 		attribute.Int64("eval.latency_ms", latency.Milliseconds()),
@@ -200,7 +195,6 @@ func (fmu *FuzzyMatchUnit) prepareString(s string) string {
 	result := s
 
 	if !fmu.config.CaseSensitive {
-		// Use package-level Unicode case folder for better performance
 		result = foldCaser.String(result)
 	}
 
@@ -210,6 +204,7 @@ func (fmu *FuzzyMatchUnit) prepareString(s string) string {
 // calculateSimilarity computes the similarity score between two strings
 // using the Levenshtein distance algorithm. Returns a value between 0.0 and 1.0
 // where 1.0 indicates identical strings and 0.0 indicates maximum dissimilarity.
+// TODO: there might be room for performance improvements here.
 func (fmu *FuzzyMatchUnit) calculateSimilarity(s1, s2 string) float64 {
 	if s1 == s2 {
 		return 1.0
@@ -306,27 +301,22 @@ func DefaultFuzzyMatchConfig() FuzzyMatchConfig {
 	}
 }
 
-// CreateFuzzyMatchUnit is a factory function that creates a FuzzyMatchUnit
-// from a configuration map, following the UnitFactory pattern.
-// This function is used by the UnitRegistry for dynamic unit creation.
-func CreateFuzzyMatchUnit(id string, config map[string]any) (*FuzzyMatchUnit, error) {
-	// Start with default configuration.
-	matchConfig := DefaultFuzzyMatchConfig()
+// NewFuzzyMatchFromConfig creates a FuzzyMatchUnit from a configuration map.
+// This is the boundary adapter for YAML/JSON configuration.
+// Fuzzy match doesn't require an LLM client (deterministic matching).
+func NewFuzzyMatchFromConfig(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+	// llm is ignored - fuzzy match is deterministic.
 
-	// Override with provided values.
-	if algorithm, ok := config["algorithm"].(string); ok {
-		matchConfig.Algorithm = algorithm
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
-	if threshold, ok := config["threshold"]; ok {
-		if val, ok := threshold.(float64); ok {
-			matchConfig.Threshold = val
-		}
+	// Start with defaults, then overlay user config.
+	cfg := DefaultFuzzyMatchConfig()
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	if caseSensitive, ok := config["case_sensitive"].(bool); ok {
-		matchConfig.CaseSensitive = caseSensitive
-	}
-
-	return NewFuzzyMatchUnit(id, matchConfig)
+	return NewFuzzyMatchUnit(id, cfg)
 }

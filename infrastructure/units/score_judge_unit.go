@@ -238,8 +238,8 @@ func NewScoreJudgeUnit(name string, llmClient ports.LLMClient, config ScoreJudge
 		return nil, err
 	}
 
-	// Compile the prompt template to prevent injection attacks.
-	tmpl, err := template.New("judgePrompt").Parse(config.JudgePrompt)
+	// Compile the prompt template with custom functions to prevent injection attacks.
+	tmpl, err := template.New("judgePrompt").Funcs(GetTemplateFuncMap()).Parse(config.JudgePrompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse judge prompt template: %w", err)
 	}
@@ -567,8 +567,8 @@ func (sju *ScoreJudgeUnit) UnmarshalParameters(params yaml.Node) (*ScoreJudgeUni
 		return nil, err
 	}
 
-	// Compile the prompt template to prevent injection attacks.
-	tmpl, err := template.New("judgePrompt").Parse(config.JudgePrompt)
+	// Compile the prompt template with custom functions to prevent injection attacks.
+	tmpl, err := template.New("judgePrompt").Funcs(GetTemplateFuncMap()).Parse(config.JudgePrompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse judge prompt template: %w", err)
 	}
@@ -583,82 +583,24 @@ func (sju *ScoreJudgeUnit) UnmarshalParameters(params yaml.Node) (*ScoreJudgeUni
 	}, nil
 }
 
-// CreateScoreJudgeUnit creates a ScoreJudgeUnit from configuration map.
-//
-// Factory function used by UnitRegistry for dynamic unit creation.
-// Extracts LLM client from config, applies defaults, and handles
-// type conversion for numeric values from YAML/JSON.
-//
-// Returns error if LLM client missing or unit creation fails.
-func CreateScoreJudgeUnit(id string, config map[string]any) (*ScoreJudgeUnit, error) {
-	// Extract LLM client from config.
-	llmClient, ok := config["llm_client"].(ports.LLMClient)
-	if !ok {
-		return nil, fmt.Errorf("llm_client is required and must implement ports.LLMClient")
+// NewScoreJudgeFromConfig creates a ScoreJudgeUnit from a configuration map.
+// This is the boundary adapter for YAML/JSON configuration.
+// Score judge requires an LLM client for evaluation.
+func NewScoreJudgeFromConfig(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+	if llm == nil {
+		return nil, fmt.Errorf("LLM client cannot be nil")
 	}
 
-	// Start with sensible defaults and merge user-provided values.
-	judgeConfig := defaultScoreJudgeConfig()
-
-	if judgePrompt, ok := config["judge_prompt"].(string); ok {
-		judgeConfig.JudgePrompt = judgePrompt
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
-	if scoreScale, ok := config["score_scale"].(string); ok {
-		judgeConfig.ScoreScale = scoreScale
+	// Start with defaults, then overlay user config.
+	cfg := defaultScoreJudgeConfig()
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	if temperature, ok := config["temperature"]; ok {
-		if val, ok := temperature.(float64); ok {
-			judgeConfig.Temperature = val
-		} else if val, ok := temperature.(int); ok {
-			// Handle integer temperature values (e.g., 0, 1)
-			judgeConfig.Temperature = float64(val)
-		} else if val, ok := temperature.(string); ok {
-			if parsed, err := strconv.ParseFloat(val, 64); err == nil {
-				judgeConfig.Temperature = parsed
-			}
-		}
-	}
-
-	if maxTokens, ok := config["max_tokens"]; ok {
-		if val, ok := maxTokens.(int); ok {
-			judgeConfig.MaxTokens = val
-		} else if val, ok := maxTokens.(float64); ok {
-			// YAML numbers often come as float64, convert to int
-			judgeConfig.MaxTokens = int(val)
-		} else if val, ok := maxTokens.(string); ok {
-			if parsed, err := strconv.Atoi(val); err == nil {
-				judgeConfig.MaxTokens = parsed
-			}
-		}
-	}
-
-	if minConfidence, ok := config["min_confidence"]; ok {
-		if val, ok := minConfidence.(float64); ok {
-			judgeConfig.MinConfidence = val
-		} else if val, ok := minConfidence.(int); ok {
-			// Handle integer confidence values (e.g., 0, 1)
-			judgeConfig.MinConfidence = float64(val)
-		} else if val, ok := minConfidence.(string); ok {
-			if parsed, err := strconv.ParseFloat(val, 64); err == nil {
-				judgeConfig.MinConfidence = parsed
-			}
-		}
-	}
-
-	if maxConcurrency, ok := config["max_concurrency"]; ok {
-		if val, ok := maxConcurrency.(int); ok {
-			judgeConfig.MaxConcurrency = val
-		} else if val, ok := maxConcurrency.(float64); ok {
-			// YAML numbers often come as float64, convert to int
-			judgeConfig.MaxConcurrency = int(val)
-		} else if val, ok := maxConcurrency.(string); ok {
-			if parsed, err := strconv.Atoi(val); err == nil {
-				judgeConfig.MaxConcurrency = parsed
-			}
-		}
-	}
-
-	return NewScoreJudgeUnit(id, llmClient, judgeConfig)
+	return NewScoreJudgeUnit(id, llm, cfg)
 }

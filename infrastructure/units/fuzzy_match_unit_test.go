@@ -34,9 +34,9 @@ func TestNewFuzzyMatchUnit(t *testing.T) {
 			wantError: false,
 		},
 		{
-			name:     "default configuration",
-			unitName: "test-fuzzy-match",
-			config:   DefaultFuzzyMatchConfig(),
+			name:      "default configuration",
+			unitName:  "test-fuzzy-match",
+			config:    DefaultFuzzyMatchConfig(),
 			wantError: false,
 		},
 		{
@@ -100,14 +100,14 @@ func TestNewFuzzyMatchUnit(t *testing.T) {
 
 func TestFuzzyMatchUnit_Execute(t *testing.T) {
 	tests := []struct {
-		name            string
-		config          FuzzyMatchConfig
-		answers         []domain.Answer
-		referenceAnswer string
+		name             string
+		config           FuzzyMatchConfig
+		answers          []domain.Answer
+		referenceAnswer  string
 		expectedMinScore []float64 // Minimum expected scores
 		expectedMaxScore []float64 // Maximum expected scores
-		expectedError   bool
-		errorMsg        string
+		expectedError    bool
+		errorMsg         string
 	}{
 		{
 			name: "high similarity matches",
@@ -121,10 +121,10 @@ func TestFuzzyMatchUnit_Execute(t *testing.T) {
 				{ID: "2", Content: "Hello world"},
 				{ID: "3", Content: "Hello Wrld"}, // One character missing
 			},
-			referenceAnswer: "hello world",
+			referenceAnswer:  "hello world",
 			expectedMinScore: []float64{1.0, 1.0, 0.85},
 			expectedMaxScore: []float64{1.0, 1.0, 0.95},
-			expectedError:   false,
+			expectedError:    false,
 		},
 		{
 			name: "below threshold matches",
@@ -135,13 +135,13 @@ func TestFuzzyMatchUnit_Execute(t *testing.T) {
 			},
 			answers: []domain.Answer{
 				{ID: "1", Content: "Hello World"},
-				{ID: "2", Content: "Hi World"},     // Too different
+				{ID: "2", Content: "Hi World"},      // Too different
 				{ID: "3", Content: "Goodbye World"}, // Very different
 			},
-			referenceAnswer: "hello world",
+			referenceAnswer:  "hello world",
 			expectedMinScore: []float64{1.0, 0.0, 0.0},
 			expectedMaxScore: []float64{1.0, 0.0, 0.0},
-			expectedError:   false,
+			expectedError:    false,
 		},
 		{
 			name: "case sensitive matching",
@@ -155,10 +155,10 @@ func TestFuzzyMatchUnit_Execute(t *testing.T) {
 				{ID: "2", Content: "hello world"}, // Exact match
 				{ID: "3", Content: "HELLO WORLD"}, // All case differences
 			},
-			referenceAnswer: "hello world",
+			referenceAnswer:  "hello world",
 			expectedMinScore: []float64{0.8, 1.0, 0.0}, // Hello World is >70% similar even with case differences
 			expectedMaxScore: []float64{0.85, 1.0, 0.0},
-			expectedError:   false,
+			expectedError:    false,
 		},
 		{
 			name: "partial matches",
@@ -172,10 +172,10 @@ func TestFuzzyMatchUnit_Execute(t *testing.T) {
 				{ID: "2", Content: "world"},
 				{ID: "3", Content: "helo word"}, // Typos
 			},
-			referenceAnswer: "hello world",
+			referenceAnswer:  "hello world",
 			expectedMinScore: []float64{0.0, 0.0, 0.7},
 			expectedMaxScore: []float64{0.5, 0.5, 0.85},
-			expectedError:   false,
+			expectedError:    false,
 		},
 		{
 			name:            "missing answers",
@@ -292,11 +292,11 @@ func TestFuzzyMatchUnit_CalculateSimilarity(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name         string
-		s1           string
-		s2           string
-		expectedMin  float64
-		expectedMax  float64
+		name        string
+		s1          string
+		s2          string
+		expectedMin float64
+		expectedMax float64
 	}{
 		{
 			name:        "identical strings",
@@ -424,7 +424,7 @@ case_sensitive: true`,
 			name: "unknown field detection",
 			yaml: `algorithm: levenshtein
 threshold: 0.75
-case_sensitiv: true`,  // Typo: case_sensitiv instead of case_sensitive
+case_sensitiv: true`, // Typo: case_sensitiv instead of case_sensitive
 			wantError: true,
 			errorMsg:  "check for typos",
 		},
@@ -474,7 +474,7 @@ func TestFuzzyMatchUnit_Validate(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestCreateFuzzyMatchUnit(t *testing.T) {
+func TestNewFuzzyMatchFromConfig(t *testing.T) {
 	tests := []struct {
 		name      string
 		id        string
@@ -523,15 +523,18 @@ func TestCreateFuzzyMatchUnit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unit, err := CreateFuzzyMatchUnit(tt.id, tt.config)
+			unitPort, err := NewFuzzyMatchFromConfig(tt.id, tt.config, nil)
 			if tt.wantError {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorMsg)
-				assert.Nil(t, unit)
+				assert.Nil(t, unitPort)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, unit)
-				assert.Equal(t, tt.id, unit.Name())
+				assert.NotNil(t, unitPort)
+				assert.Equal(t, tt.id, unitPort.Name())
+				// Type assert to access internal config
+				unit, ok := unitPort.(*FuzzyMatchUnit)
+				require.True(t, ok, "unit should be *FuzzyMatchUnit")
 				assert.Equal(t, tt.expected, unit.config)
 			}
 		})
@@ -607,7 +610,7 @@ func BenchmarkFuzzyMatchUnit_Execute(b *testing.B) {
 		}
 		p95Latency := latencies[p95Index]
 		b.Logf("p95 latency: %v (target: ≤300µs)", p95Latency)
-		
+
 		// Assert that p95 latency meets the requirement.
 		if p95Latency > 300*time.Microsecond {
 			b.Errorf("p95 latency %v exceeds 300µs requirement", p95Latency)
@@ -618,13 +621,13 @@ func BenchmarkFuzzyMatchUnit_Execute(b *testing.B) {
 // TestFuzzyMatchUnit_UnicodeHandling tests that Unicode strings are handled correctly.
 func TestFuzzyMatchUnit_UnicodeHandling(t *testing.T) {
 	tests := []struct {
-		name            string
-		answer          string
-		reference       string
-		caseSensitive   bool
-		threshold       float64
-		expectedScore   float64
-		description     string
+		name          string
+		answer        string
+		reference     string
+		caseSensitive bool
+		threshold     float64
+		expectedScore float64
+		description   string
 	}{
 		{
 			name:          "Chinese characters exact match",
@@ -741,10 +744,10 @@ case_sensitive: false`,
 
 	const numGoroutines = 100
 	const numIterations = 50
-	
+
 	var wg sync.WaitGroup
 	errChan := make(chan error, numGoroutines*numIterations)
-	
+
 	// Start goroutines that continuously execute
 	for i := 0; i < numGoroutines/2; i++ {
 		wg.Add(1)

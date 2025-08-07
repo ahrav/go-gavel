@@ -34,16 +34,17 @@ var _ ports.Unit = (*MedianPoolUnit)(nil)
 //   - Returns ErrTie when multiple candidates are equidistant and TieError is configured
 //
 // Example:
-//   config := MedianPoolConfig{
-//       TieBreaker: TieFirst,
-//       MinScore: 0.6,
-//       RequireAllScores: true,
-//   }
-//   unit, err := NewMedianPoolUnit("median_agg", config)
+//
+//	config := MedianPoolConfig{
+//	    TieBreaker: TieFirst,
+//	    MinScore: 0.6,
+//	    RequireAllScores: true,
+//	}
+//	unit, err := NewMedianPoolUnit("median_agg", config)
 type MedianPoolUnit struct {
 	// name is the unique identifier for this unit instance.
 	// Used for logging, debugging, and verdict ID generation.
-	name   string
+	name string
 	// config contains validated configuration parameters.
 	// Immutable after unit creation to ensure thread safety.
 	config MedianPoolConfig
@@ -125,13 +126,13 @@ func (mpu *MedianPoolUnit) Name() string { return mpu.name }
 //   - domain.KeyVerdict: *domain.Verdict - winner and aggregate score
 //
 // Algorithm:
-//   1. Extract answers and judge scores from state
-//   2. Validate counts match (if RequireAllScores is true)
-//   3. Calculate statistical median of all scores
-//   4. Find candidate with minimum distance from median
-//   5. Apply tie-breaking strategy if multiple candidates are equidistant
-//   6. Verify median meets minimum score threshold
-//   7. Create verdict with winner and median as aggregate score
+//  1. Extract answers and judge scores from state
+//  2. Validate counts match (if RequireAllScores is true)
+//  3. Calculate statistical median of all scores
+//  4. Find candidate with minimum distance from median
+//  5. Apply tie-breaking strategy if multiple candidates are equidistant
+//  6. Verify median meets minimum score threshold
+//  7. Create verdict with winner and median as aggregate score
 //
 // Error Conditions:
 //   - Missing required state keys
@@ -229,11 +230,11 @@ func (mpu *MedianPoolUnit) calculateMedian(scores []float64) float64 {
 //   - error: Validation or processing error
 //
 // Algorithm Details:
-//   1. Validates input arrays have equal length and contain valid scores
-//   2. Calculates median using standard statistical definition
-//   3. Finds candidate(s) with minimum absolute distance from median
-//   4. Applies configured tie-breaking strategy for equidistant candidates
-//   5. Validates median meets minimum score threshold
+//  1. Validates input arrays have equal length and contain valid scores
+//  2. Calculates median using standard statistical definition
+//  3. Finds candidate(s) with minimum absolute distance from median
+//  4. Applies configured tie-breaking strategy for equidistant candidates
+//  5. Validates median meets minimum score threshold
 //
 // Error Conditions:
 //   - ErrNoScores: empty scores slice
@@ -340,9 +341,10 @@ func (mpu *MedianPoolUnit) Validate() error {
 //   - require_all_scores: boolean
 //
 // Example YAML:
-//   tie_breaker: "first"
-//   min_score: 0.7
-//   require_all_scores: true
+//
+//	tie_breaker: "first"
+//	min_score: 0.7
+//	require_all_scores: true
 //
 // Error Conditions:
 //   - YAML parsing errors for malformed input
@@ -373,9 +375,10 @@ func (mpu *MedianPoolUnit) UnmarshalParameters(params yaml.Node) error {
 //   - RequireAllScores: true (strict scoring validation)
 //
 // Use this as a starting point and override specific fields as needed:
-//   config := DefaultMedianPoolConfig()
-//   config.MinScore = 0.6  // Add quality threshold
-//   config.TieBreaker = TieRandom  // Enable fair tie-breaking
+//
+//	config := DefaultMedianPoolConfig()
+//	config.MinScore = 0.6  // Add quality threshold
+//	config.TieBreaker = TieRandom  // Enable fair tie-breaking
 func DefaultMedianPoolConfig() MedianPoolConfig {
 	return MedianPoolConfig{
 		TieBreaker:       TieFirst,
@@ -384,61 +387,23 @@ func DefaultMedianPoolConfig() MedianPoolConfig {
 	}
 }
 
-// CreateMedianPoolUnit is a factory function that creates a MedianPoolUnit from a
-// configuration map. This function integrates with the UnitRegistry for dynamic
-// unit creation and supports configuration from external sources (YAML, JSON).
-//
-// Parameters:
-//   - id: Unique identifier for the created unit
-//   - config: Configuration map with string keys and type-asserted values
-//
-// Supported Configuration Keys:
-//   - "tie_breaker" (string): "first"|"random"|"error"
-//   - "min_score" (float64): minimum acceptable median score
-//   - "require_all_scores" (bool): strict score count validation
-//
-// The function starts with sensible defaults and applies configuration overrides,
-// providing robustness against partial or missing configuration.
-//
-// Error Conditions:
-//   - Type assertion failures for incorrectly typed configuration values
-//   - Invalid TieBreaker string values
-//   - Configuration validation failures
-//   - Empty unit ID
-//
-// Thread Safety: Safe for concurrent use (creates new instances)
-func CreateMedianPoolUnit(id string, config map[string]any) (*MedianPoolUnit, error) {
-	poolConfig := DefaultMedianPoolConfig()
+// NewMedianPoolFromConfig creates a MedianPoolUnit from a configuration map.
+// This is the boundary adapter for YAML/JSON configuration.
+// Median pool doesn't require an LLM client (deterministic aggregation).
+func NewMedianPoolFromConfig(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+	// llm is ignored - median pool is deterministic.
 
-	if val, ok := config["tie_breaker"]; ok {
-		strVal, isString := val.(string)
-		if !isString {
-			return nil, fmt.Errorf("tie_breaker must be a string, got %T", val)
-		}
-		// Validate the string value against allowed TieBreaker values
-		switch strVal {
-		case "first", "random", "error":
-			poolConfig.TieBreaker = TieBreaker(strVal)
-		default:
-			return nil, fmt.Errorf("invalid tie_breaker value: %s (must be one of: first, random, error)", strVal)
-		}
+	// Use yaml marshaling for clean conversion.
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
-	if val, ok := config["min_score"]; ok {
-		floatVal, isFloat := val.(float64)
-		if !isFloat {
-			return nil, fmt.Errorf("min_score must be a float64, got %T", val)
-		}
-		poolConfig.MinScore = floatVal
+	// Start with defaults, then overlay user config.
+	cfg := DefaultMedianPoolConfig()
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	if val, ok := config["require_all_scores"]; ok {
-		boolVal, isBool := val.(bool)
-		if !isBool {
-			return nil, fmt.Errorf("require_all_scores must be a bool, got %T", val)
-		}
-		poolConfig.RequireAllScores = boolVal
-	}
-
-	return NewMedianPoolUnit(id, poolConfig)
+	return NewMedianPoolUnit(id, cfg)
 }

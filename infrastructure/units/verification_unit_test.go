@@ -671,26 +671,27 @@ max_tokens: 512
 	}
 }
 
-// TestCreateVerificationUnit tests the factory function for creating a VerificationUnit.
+// TestNewVerificationFromConfig tests the factory function for creating a VerificationUnit.
 // It ensures that the unit can be created from a map of parameters,
 // handles type conversions correctly, applies default values, and fails when
 // required fields like the LLM client are missing.
-func TestCreateVerificationUnit(t *testing.T) {
+func TestNewVerificationFromConfig(t *testing.T) {
 	mockLLM := testutils.NewMockLLMClient("test-model")
 
 	tests := []struct {
-		name    string
-		id      string
-		config  map[string]any
-		wantErr bool
-		errMsg  string
-		check   func(t *testing.T, unit *VerificationUnit)
+		name      string
+		id        string
+		config    map[string]any
+		llmClient ports.LLMClient // Add this field to allow testing with nil
+		wantErr   bool
+		errMsg    string
+		check     func(t *testing.T, unit *VerificationUnit)
 	}{
 		{
-			name: "valid config creates unit successfully",
-			id:   "verifier1",
+			name:      "valid config creates unit successfully",
+			id:        "verifier1",
+			llmClient: mockLLM,
 			config: map[string]any{
-				"llm_client":           mockLLM,
 				"prompt_template":      "Verify these results: {{.Question}}",
 				"confidence_threshold": 0.85,
 				"temperature":          0.1,
@@ -705,11 +706,9 @@ func TestCreateVerificationUnit(t *testing.T) {
 			},
 		},
 		{
-			name: "uses defaults for missing optional fields",
-			id:   "verifier2",
-			config: map[string]any{
-				"llm_client": mockLLM,
-			},
+			name:    "uses defaults for missing optional fields",
+			id:      "verifier2",
+			config:  map[string]any{},
 			wantErr: false,
 			check: func(t *testing.T, unit *VerificationUnit) {
 				assert.Equal(t, DefaultVerificationConfThreshold, unit.config.ConfidenceThreshold)
@@ -718,20 +717,20 @@ func TestCreateVerificationUnit(t *testing.T) {
 			},
 		},
 		{
-			name: "missing LLM client returns error",
-			id:   "verifier3",
+			name:      "nil LLM client returns error",
+			id:        "verifier3",
+			llmClient: nil, // Explicitly nil
 			config: map[string]any{
 				"prompt_template": "Verify these results: {{.Question}}",
 			},
 			wantErr: true,
-			errMsg:  "llm_client is required",
+			errMsg:  "LLM client cannot be nil",
 		},
 		{
 			name: "handles different numeric types for confidence threshold",
 			id:   "verifier4",
 			config: map[string]any{
-				"llm_client":           mockLLM,
-				"confidence_threshold": "0.75", // String number
+				"confidence_threshold": 0.75, // Use actual float
 			},
 			wantErr: false,
 			check: func(t *testing.T, unit *VerificationUnit) {
@@ -742,7 +741,6 @@ func TestCreateVerificationUnit(t *testing.T) {
 			name: "handles integer temperature",
 			id:   "verifier5",
 			config: map[string]any{
-				"llm_client":  mockLLM,
 				"temperature": 0, // Integer
 			},
 			wantErr: false,
@@ -754,7 +752,6 @@ func TestCreateVerificationUnit(t *testing.T) {
 			name: "handles float64 max tokens",
 			id:   "verifier6",
 			config: map[string]any{
-				"llm_client": mockLLM,
 				"max_tokens": 750.0, // Float64
 			},
 			wantErr: false,
@@ -766,16 +763,23 @@ func TestCreateVerificationUnit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unit, err := CreateVerificationUnit(tt.id, tt.config)
+			// Use the llmClient from the test case, defaulting to mockLLM if not specified
+			llm := tt.llmClient
+			if llm == nil && !tt.wantErr {
+				llm = mockLLM
+			}
+			unitPort, err := NewVerificationFromConfig(tt.id, tt.config, llm)
 
 			if tt.wantErr {
 				require.Error(t, err, "expected creation error")
 				assert.Contains(t, err.Error(), tt.errMsg, "error message should contain expected text")
 			} else {
 				require.NoError(t, err, "unexpected creation error")
-				assert.NotNil(t, unit, "unit should not be nil")
+				assert.NotNil(t, unitPort, "unit should not be nil")
 
 				if tt.check != nil {
+					unit, ok := unitPort.(*VerificationUnit)
+					require.True(t, ok, "unit should be *VerificationUnit")
 					tt.check(t, unit)
 				}
 			}

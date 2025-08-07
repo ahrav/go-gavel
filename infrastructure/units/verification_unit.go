@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"text/template"
 
@@ -153,7 +152,7 @@ func (vu *VerificationUnit) validateAndCompileConfig(
 		return nil, fmt.Errorf("unit %s: %w", unitName, err)
 	}
 
-	tmpl, err := template.New("verificationPrompt").Parse(config.PromptTemplate)
+	tmpl, err := template.New("verificationPrompt").Funcs(GetTemplateFuncMap()).Parse(config.PromptTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("unit %s: failed to parse prompt template: %w", unitName, err)
 	}
@@ -624,42 +623,25 @@ func (vu *VerificationUnit) UnmarshalParameters(params yaml.Node) (*Verification
 	}, nil
 }
 
-// CreateVerificationUnit is a factory function that creates a VerificationUnit
-// from a configuration map for use with the UnitRegistry.
-//
-// Required configuration:
-//   - llm_client: must implement ports.LLMClient interface
-//
-// Optional configuration (uses defaults if not provided):
-//   - prompt_template: string template for verification prompts
-//   - confidence_threshold: float64 (0.0-1.0) for human review triggering
-//   - temperature: float64 (0.0-1.0) for LLM response randomness
-//   - max_tokens: int for maximum verification response length
-func CreateVerificationUnit(id string, config map[string]any) (*VerificationUnit, error) {
-	llmClient, ok := config["llm_client"].(ports.LLMClient)
-	if !ok {
-		return nil, fmt.Errorf("llm_client is required and must implement ports.LLMClient")
+// NewVerificationFromConfig creates a VerificationUnit from a configuration map.
+// This is the boundary adapter for YAML/JSON configuration.
+// Verification requires an LLM client for quality verification.
+func NewVerificationFromConfig(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+	if llm == nil {
+		return nil, fmt.Errorf("LLM client cannot be nil")
 	}
 
-	verificationConfig := defaultVerificationConfig()
-	if val, ok := config["prompt_template"].(string); ok {
-		verificationConfig.PromptTemplate = val
-	}
-	if val, ok := config["confidence_threshold"]; ok {
-		if f, err := strconv.ParseFloat(fmt.Sprintf("%v", val), 64); err == nil {
-			verificationConfig.ConfidenceThreshold = f
-		}
-	}
-	if val, ok := config["temperature"]; ok {
-		if f, err := strconv.ParseFloat(fmt.Sprintf("%v", val), 64); err == nil {
-			verificationConfig.Temperature = f
-		}
-	}
-	if val, ok := config["max_tokens"]; ok {
-		if i, err := strconv.Atoi(fmt.Sprintf("%v", val)); err == nil {
-			verificationConfig.MaxTokens = i
-		}
+	// Use yaml marshaling for clean conversion
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
-	return NewVerificationUnit(id, llmClient, verificationConfig)
+	// Start with defaults, then overlay user config
+	cfg := defaultVerificationConfig()
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	return NewVerificationUnit(id, llm, cfg)
 }

@@ -176,7 +176,6 @@ func (emu *ExactMatchUnit) Execute(ctx context.Context, state domain.State) (dom
 	totalScore := 0.0
 
 	for i, answer := range answers {
-		// Validate individual answer length to prevent resource exhaustion.
 		if len(answer.Content) > MaxStringLength {
 			err := fmt.Errorf("answer %d too long: %d bytes exceeds limit of %d", i, len(answer.Content), MaxStringLength)
 			span.RecordError(err)
@@ -298,17 +297,23 @@ func DefaultExactMatchConfig() ExactMatchConfig {
 //
 // Returns an error only if the id parameter is empty or unit creation fails
 // during validation.
-func CreateExactMatchUnit(id string, config map[string]any) (*ExactMatchUnit, error) {
-	matchConfig := DefaultExactMatchConfig()
 
-	// Override with provided values.
-	if caseSensitive, ok := config["case_sensitive"].(bool); ok {
-		matchConfig.CaseSensitive = caseSensitive
+// NewExactMatchFromConfig creates an ExactMatchUnit from a configuration map.
+// This is the boundary adapter for YAML/JSON configuration.
+// Exact match doesn't require an LLM client.
+func NewExactMatchFromConfig(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+	// llm is ignored - exact match is deterministic.
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
-	if trimWhitespace, ok := config["trim_whitespace"].(bool); ok {
-		matchConfig.TrimWhitespace = trimWhitespace
+	// Start with defaults, then overlay user config.
+	cfg := DefaultExactMatchConfig()
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	return NewExactMatchUnit(id, matchConfig)
+	return NewExactMatchUnit(id, cfg)
 }

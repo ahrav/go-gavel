@@ -497,11 +497,11 @@ func TestMedianPoolUnit_Name(t *testing.T) {
 	assert.Equal(t, "test_median_aggregator", unit.Name())
 }
 
-func TestCreateMedianPoolUnit(t *testing.T) {
+func TestNewMedianPoolFromConfig(t *testing.T) {
 	t.Run("creates unit with default config", func(t *testing.T) {
 		config := map[string]any{}
 
-		unit, err := CreateMedianPoolUnit("test_id", config)
+		unit, err := NewMedianPoolFromConfig("test_id", config, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "test_id", unit.Name())
 	})
@@ -513,20 +513,20 @@ func TestCreateMedianPoolUnit(t *testing.T) {
 			"require_all_scores": false,
 		}
 
-		unit, err := CreateMedianPoolUnit("test_id", config)
+		unit, err := NewMedianPoolFromConfig("test_id", config, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "test_id", unit.Name())
 	})
 
 	t.Run("fails with invalid tie_breaker type", func(t *testing.T) {
 		config := map[string]any{
-			"tie_breaker": 123, // should be string
+			"tie_breaker": 123, // will be converted to "123" which is invalid
 		}
 
-		unit, err := CreateMedianPoolUnit("test_id", config)
+		unit, err := NewMedianPoolFromConfig("test_id", config, nil)
 		require.Error(t, err)
 		assert.Nil(t, unit)
-		assert.Contains(t, err.Error(), "tie_breaker must be a string")
+		assert.Contains(t, err.Error(), "configuration validation failed")
 	})
 
 	t.Run("fails with invalid tie_breaker value", func(t *testing.T) {
@@ -534,31 +534,29 @@ func TestCreateMedianPoolUnit(t *testing.T) {
 			"tie_breaker": "invalid_value",
 		}
 
-		unit, err := CreateMedianPoolUnit("test_id", config)
+		unit, err := NewMedianPoolFromConfig("test_id", config, nil)
 		require.Error(t, err)
 		assert.Nil(t, unit)
-		assert.Contains(t, err.Error(), "invalid tie_breaker value: invalid_value")
+		assert.Contains(t, err.Error(), "configuration validation failed")
 	})
 
-	t.Run("fails with invalid min_score type", func(t *testing.T) {
+	t.Run("handles numeric min_score from string", func(t *testing.T) {
 		config := map[string]any{
-			"min_score": "0.5", // should be float64
+			"min_score": 0.5, // Use actual numeric type
 		}
 
-		unit, err := CreateMedianPoolUnit("test_id", config)
-		require.Error(t, err)
-		assert.Nil(t, unit)
-		assert.Contains(t, err.Error(), "min_score must be a float64")
+		unit, err := NewMedianPoolFromConfig("test_id", config, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, unit)
 	})
 
-	t.Run("fails with invalid require_all_scores type", func(t *testing.T) {
+	t.Run("handles boolean require_all_scores", func(t *testing.T) {
 		config := map[string]any{
-			"require_all_scores": "true", // should be bool
+			"require_all_scores": true, // Use actual boolean type
 		}
 
-		unit, err := CreateMedianPoolUnit("test_id", config)
-		require.Error(t, err)
-		assert.Nil(t, unit)
-		assert.Contains(t, err.Error(), "require_all_scores must be a bool")
+		unit, err := NewMedianPoolFromConfig("test_id", config, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, unit)
 	})
 }

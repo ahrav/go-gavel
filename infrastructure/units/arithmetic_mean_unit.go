@@ -317,37 +317,22 @@ func DefaultArithmeticMeanConfig() ArithmeticMeanConfig {
 	}
 }
 
-// CreateArithmeticMeanUnit creates an ArithmeticMeanUnit from a configuration
-// map following the UnitFactory pattern for dynamic unit instantiation.
-//
-// Supported configuration keys:
-//   - "tie_breaker" (string): "first", "random", or "error"
-//   - "min_score" (float64): Minimum acceptable aggregate score (0.0-1.0)
-//   - "require_all_scores" (bool): Enforce complete score coverage
-//
-// Missing keys default to DefaultArithmeticMeanConfig values. Invalid values
-// are silently ignored, preserving defaults for robustness.
-//
-// Returns an error only if the id parameter is empty or unit creation fails
-// during validation.
-func CreateArithmeticMeanUnit(id string, config map[string]any) (*ArithmeticMeanUnit, error) {
-	// Start with default configuration.
-	poolConfig := DefaultArithmeticMeanConfig()
+// NewArithmeticMeanFromConfig creates an ArithmeticMeanUnit from a configuration map.
+// This is the boundary adapter for YAML/JSON configuration.
+// Arithmetic mean doesn't require an LLM client (deterministic aggregation).
+func NewArithmeticMeanFromConfig(id string, config map[string]any, llm ports.LLMClient) (ports.Unit, error) {
+	// llm is ignored - arithmetic mean is deterministic.
 
-	// Override with provided values.
-	if tieBreaker, ok := config["tie_breaker"].(string); ok {
-		poolConfig.TieBreaker = TieBreaker(tieBreaker)
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
-	if minScore, ok := config["min_score"]; ok {
-		if val, ok := minScore.(float64); ok {
-			poolConfig.MinScore = val
-		}
+	// Start with defaults, then overlay user config.
+	cfg := DefaultArithmeticMeanConfig()
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	if requireAllScores, ok := config["require_all_scores"].(bool); ok {
-		poolConfig.RequireAllScores = requireAllScores
-	}
-
-	return NewArithmeticMeanUnit(id, poolConfig)
+	return NewArithmeticMeanUnit(id, cfg)
 }

@@ -407,11 +407,11 @@ func TestMeanPoolUnit_Name(t *testing.T) {
 	assert.Equal(t, "test_aggregator", unit.Name())
 }
 
-func TestCreateMaxPoolUnit(t *testing.T) {
+func TestNewMaxPoolFromConfig(t *testing.T) {
 	t.Run("creates unit with default config", func(t *testing.T) {
 		config := map[string]any{}
 
-		unit, err := CreateMaxPoolUnit("test_id", config)
+		unit, err := NewMaxPoolFromConfig("test_id", config, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "test_id", unit.Name())
 	})
@@ -423,7 +423,7 @@ func TestCreateMaxPoolUnit(t *testing.T) {
 			"require_all_scores": false,
 		}
 
-		unit, err := CreateMaxPoolUnit("test_id", config)
+		unit, err := NewMaxPoolFromConfig("test_id", config, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "test_id", unit.Name())
 	})
