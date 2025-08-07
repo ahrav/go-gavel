@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ahrav/go-gavel/internal/domain"
@@ -43,6 +47,8 @@ type ArithmeticMeanUnit struct {
 	name string
 	// config contains the validated configuration parameters.
 	config ArithmeticMeanConfig
+	// tracer is the OpenTelemetry tracer for observability.
+	tracer trace.Tracer
 }
 
 // ArithmeticMeanConfig controls aggregation behavior and quality requirements
@@ -91,6 +97,7 @@ func NewArithmeticMeanUnit(name string, config ArithmeticMeanConfig) (*Arithmeti
 	return &ArithmeticMeanUnit{
 		name:   name,
 		config: config,
+		tracer: otel.Tracer("arithmetic-mean-unit"),
 	}, nil
 }
 
@@ -122,18 +129,37 @@ func (mpu *ArithmeticMeanUnit) Name() string { return mpu.name }
 //
 // The function is safe for concurrent execution and does not modify input state.
 func (mpu *ArithmeticMeanUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
+	_, span := mpu.tracer.Start(ctx, "ArithmeticMeanUnit.Execute",
+		trace.WithAttributes(
+			attribute.String("unit.type", "arithmetic_mean"),
+			attribute.String("unit.id", mpu.name),
+			attribute.String("config.tie_breaker", string(mpu.config.TieBreaker)),
+			attribute.Float64("config.min_score", mpu.config.MinScore),
+			attribute.Bool("config.require_all_scores", mpu.config.RequireAllScores),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+
 	answers, ok := domain.Get(state, domain.KeyAnswers)
 	if !ok {
-		return state, fmt.Errorf("answers not found in state")
+		err := fmt.Errorf("answers not found in state")
+		span.RecordError(err)
+		return state, err
 	}
 
 	if len(answers) == 0 {
-		return state, fmt.Errorf("no answers to aggregate")
+		err := fmt.Errorf("no answers to aggregate")
+		span.RecordError(err)
+		return state, err
 	}
 
 	judgeSummaries, ok := domain.Get(state, domain.KeyJudgeScores)
 	if !ok {
-		return state, fmt.Errorf("judge scores not found in state")
+		err := fmt.Errorf("judge scores not found in state")
+		span.RecordError(err)
+		return state, err
 	}
 
 	numAnswers := len(answers)
@@ -142,8 +168,10 @@ func (mpu *ArithmeticMeanUnit) Execute(ctx context.Context, state domain.State) 
 	// Validate answer-score pairing based on configuration requirements.
 	if numScores != numAnswers {
 		if mpu.config.RequireAllScores {
-			return state, fmt.Errorf("mismatch between answers (%d) and judge scores (%d)",
+			err := fmt.Errorf("mismatch between answers (%d) and judge scores (%d)",
 				numAnswers, numScores)
+			span.RecordError(err)
+			return state, err
 		}
 		// Handle partial scoring case - only process up to the minimum available.
 		// This enables flexible evaluation with optional scoring.
@@ -163,7 +191,9 @@ func (mpu *ArithmeticMeanUnit) Execute(ctx context.Context, state domain.State) 
 
 	winner, aggregateScore, err := mpu.Aggregate(scores, validAnswers)
 	if err != nil {
-		return state, fmt.Errorf("aggregation failed: %w", err)
+		err := fmt.Errorf("aggregation failed: %w", err)
+		span.RecordError(err)
+		return state, err
 	}
 
 	verdict := domain.Verdict{
@@ -172,6 +202,16 @@ func (mpu *ArithmeticMeanUnit) Execute(ctx context.Context, state domain.State) 
 		AggregateScore: aggregateScore,
 		// TODO: Add trace and budget information when available.
 	}
+
+	latency := time.Since(start)
+	span.SetAttributes(
+		attribute.Int64("eval.latency_ms", latency.Milliseconds()),
+		attribute.Int("eval.answers_count", len(answers)),
+		attribute.Int("eval.judge_scores_count", len(judgeSummaries)),
+		attribute.Float64("eval.aggregate_score", aggregateScore),
+		attribute.String("eval.winner_id", winner.ID),
+		attribute.Bool("no_llm_cost", true), // Deterministic units have no LLM cost
+	)
 
 	return domain.With(state, domain.KeyVerdict, &verdict), nil
 }

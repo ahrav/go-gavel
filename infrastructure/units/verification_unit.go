@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/go-playground/validator/v10"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ahrav/go-gavel/internal/domain"
@@ -35,6 +39,7 @@ type VerificationUnit struct {
 	llmClient      ports.LLMClient
 	validator      *validator.Validate
 	promptTemplate *template.Template
+	tracer         trace.Tracer
 }
 
 // VerificationConfig defines the configuration parameters for the VerificationUnit.
@@ -185,6 +190,7 @@ func NewVerificationUnit(
 		config:    config,
 		llmClient: llmClient,
 		validator: validator.New(),
+		tracer:    otel.Tracer("verification-unit"),
 	}
 
 	tmpl, err := unit.validateAndCompileConfig(config, llmClient, name)
@@ -534,8 +540,22 @@ func (vu *VerificationUnit) updateBudgetWithTokens(state domain.State, tokensIn,
 // Context cancellation is supported throughout the LLM call chain.
 // Returns an error if required state data is missing or LLM analysis fails.
 func (vu *VerificationUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
+	_, span := vu.tracer.Start(ctx, "VerificationUnit.Execute",
+		trace.WithAttributes(
+			attribute.String("unit.type", "verification"),
+			attribute.String("unit.id", vu.name),
+			attribute.Float64("config.confidence_threshold", vu.config.ConfidenceThreshold),
+			attribute.Float64("config.temperature", vu.config.Temperature),
+			attribute.Int("config.max_tokens", vu.config.MaxTokens),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+
 	question, answers, judgeScores, err := vu.extractVerificationInputs(state)
 	if err != nil {
+		span.RecordError(err)
 		return state, err
 	}
 
@@ -544,26 +564,45 @@ func (vu *VerificationUnit) Execute(ctx context.Context, state domain.State) (do
 
 	prompt, err := vu.buildVerificationPrompt(question, truncatedAnswers, judgeScores)
 	if err != nil {
+		span.RecordError(err)
 		return state, err
 	}
 
 	response, tokensIn, tokensOut, err := vu.callVerificationLLM(ctx, prompt)
 	if err != nil {
-		return state, fmt.Errorf("unit %s: LLM call failed: %w", vu.name, err)
+		err := fmt.Errorf("unit %s: LLM call failed: %w", vu.name, err)
+		span.RecordError(err)
+		return state, err
 	}
 
 	verificationResp, err := vu.parseLLMResponse(response)
 	if err != nil {
-		return state, fmt.Errorf("unit %s: failed to parse LLM response: %w", vu.name, err)
+		err := fmt.Errorf("unit %s: failed to parse LLM response: %w", vu.name, err)
+		span.RecordError(err)
+		return state, err
 	}
 
 	state, err = vu.updateVerdictWithVerification(state, verificationResp)
 	if err != nil {
+		span.RecordError(err)
 		return state, err
 	}
 
 	state = vu.addVerificationTrace(state, verificationResp)
 	state = vu.updateBudgetWithTokens(state, tokensIn, tokensOut)
+
+	latency := time.Since(start)
+	span.SetAttributes(
+		attribute.Int64("eval.latency_ms", latency.Milliseconds()),
+		attribute.Int("eval.answers_count", len(answers)),
+		attribute.Int("eval.judge_scores_count", len(judgeScores)),
+		attribute.Int("eval.question_length", len(question)),
+		attribute.Float64("eval.verification_confidence", verificationResp.Confidence),
+		attribute.Bool("eval.requires_human_review", verificationResp.Confidence < vu.config.ConfidenceThreshold),
+		attribute.Int("eval.tokens_in", tokensIn),
+		attribute.Int("eval.tokens_out", tokensOut),
+		attribute.Bool("no_llm_cost", false), // LLM-based units have cost
+	)
 
 	return state, nil
 }
@@ -620,6 +659,7 @@ func (vu *VerificationUnit) UnmarshalParameters(params yaml.Node) (*Verification
 		llmClient:      vu.llmClient,
 		validator:      vu.validator,
 		promptTemplate: tmpl,
+		tracer:         otel.Tracer("verification-unit"),
 	}, nil
 }
 

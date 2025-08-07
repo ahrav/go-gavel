@@ -9,8 +9,12 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/go-playground/validator/v10"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
@@ -48,6 +52,8 @@ type ScoreJudgeUnit struct {
 	validator *validator.Validate
 	// promptTemplate is the compiled template for safe prompt generation.
 	promptTemplate *template.Template
+	// tracer is the OpenTelemetry tracer for observability.
+	tracer trace.Tracer
 }
 
 // ScoreJudgeConfig configures LLM-based answer scoring behavior.
@@ -250,6 +256,7 @@ func NewScoreJudgeUnit(name string, llmClient ports.LLMClient, config ScoreJudge
 		llmClient:      llmClient,
 		validator:      v,
 		promptTemplate: tmpl,
+		tracer:         otel.Tracer("score-judge-unit"),
 	}, nil
 }
 
@@ -265,18 +272,39 @@ func (sju *ScoreJudgeUnit) Name() string { return sju.name }
 // Returns error if question/answers missing, LLM calls fail,
 // confidence below threshold, or context cancellation occurs.
 func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
+	_, span := sju.tracer.Start(ctx, "ScoreJudgeUnit.Execute",
+		trace.WithAttributes(
+			attribute.String("unit.type", "score_judge"),
+			attribute.String("unit.id", sju.name),
+			attribute.String("config.score_scale", sju.config.ScoreScale),
+			attribute.Float64("config.temperature", sju.config.Temperature),
+			attribute.Int("config.max_tokens", sju.config.MaxTokens),
+			attribute.Float64("config.min_confidence", sju.config.MinConfidence),
+			attribute.Int("config.max_concurrency", sju.config.MaxConcurrency),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+
 	question, ok := domain.Get(state, domain.KeyQuestion)
 	if !ok {
-		return state, fmt.Errorf("unit %s: question not found in state", sju.name)
+		err := fmt.Errorf("unit %s: question not found in state", sju.name)
+		span.RecordError(err)
+		return state, err
 	}
 
 	answers, ok := domain.Get(state, domain.KeyAnswers)
 	if !ok {
-		return state, fmt.Errorf("unit %s: answers not found in state", sju.name)
+		err := fmt.Errorf("unit %s: answers not found in state", sju.name)
+		span.RecordError(err)
+		return state, err
 	}
 
 	if len(answers) == 0 {
-		return state, fmt.Errorf("unit %s: no answers to score", sju.name)
+		err := fmt.Errorf("unit %s: no answers to score", sju.name)
+		span.RecordError(err)
+		return state, err
 	}
 
 	// Score each answer concurrently for better performance.
@@ -357,8 +385,18 @@ func (sju *ScoreJudgeUnit) Execute(ctx context.Context, state domain.State) (dom
 	}
 
 	if err := g.Wait(); err != nil {
+		span.RecordError(err)
 		return state, err
 	}
+
+	latency := time.Since(start)
+	span.SetAttributes(
+		attribute.Int64("eval.latency_ms", latency.Milliseconds()),
+		attribute.Int("eval.answers_count", len(answers)),
+		attribute.Int("eval.question_length", len(question)),
+		attribute.Int("eval.judge_scores_count", len(judgeSummaries)),
+		attribute.Bool("no_llm_cost", false), // LLM-based units have cost
+	)
 
 	return domain.With(state, domain.KeyJudgeScores, judgeSummaries), nil
 }
@@ -580,6 +618,7 @@ func (sju *ScoreJudgeUnit) UnmarshalParameters(params yaml.Node) (*ScoreJudgeUni
 		llmClient:      sju.llmClient,
 		validator:      sju.validator,
 		promptTemplate: tmpl,
+		tracer:         otel.Tracer("score-judge-unit"),
 	}, nil
 }
 

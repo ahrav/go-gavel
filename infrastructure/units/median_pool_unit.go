@@ -6,7 +6,11 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ahrav/go-gavel/internal/domain"
@@ -48,6 +52,8 @@ type MedianPoolUnit struct {
 	// config contains validated configuration parameters.
 	// Immutable after unit creation to ensure thread safety.
 	config MedianPoolConfig
+	// tracer is the OpenTelemetry tracer for observability.
+	tracer trace.Tracer
 }
 
 // MedianPoolConfig defines the configuration parameters for the MedianPoolUnit.
@@ -104,6 +110,7 @@ func NewMedianPoolUnit(name string, config MedianPoolConfig) (*MedianPoolUnit, e
 	return &MedianPoolUnit{
 		name:   name,
 		config: config,
+		tracer: otel.Tracer("median-pool-unit"),
 	}, nil
 }
 
@@ -141,18 +148,37 @@ func (mpu *MedianPoolUnit) Name() string { return mpu.name }
 //   - Tie resolution failure (when TieBreaker=TieError)
 //   - Invalid scores (NaN, Inf)
 func (mpu *MedianPoolUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
+	_, span := mpu.tracer.Start(ctx, "MedianPoolUnit.Execute",
+		trace.WithAttributes(
+			attribute.String("unit.type", "median_pool"),
+			attribute.String("unit.id", mpu.name),
+			attribute.String("config.tie_breaker", string(mpu.config.TieBreaker)),
+			attribute.Float64("config.min_score", mpu.config.MinScore),
+			attribute.Bool("config.require_all_scores", mpu.config.RequireAllScores),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+
 	answers, ok := domain.Get(state, domain.KeyAnswers)
 	if !ok {
-		return state, fmt.Errorf("answers not found in state")
+		err := fmt.Errorf("answers not found in state")
+		span.RecordError(err)
+		return state, err
 	}
 
 	if len(answers) == 0 {
-		return state, fmt.Errorf("no answers to aggregate")
+		err := fmt.Errorf("no answers to aggregate")
+		span.RecordError(err)
+		return state, err
 	}
 
 	judgeSummaries, ok := domain.Get(state, domain.KeyJudgeScores)
 	if !ok {
-		return state, fmt.Errorf("judge scores not found in state")
+		err := fmt.Errorf("judge scores not found in state")
+		span.RecordError(err)
+		return state, err
 	}
 
 	numAnswers := len(answers)
@@ -160,7 +186,9 @@ func (mpu *MedianPoolUnit) Execute(ctx context.Context, state domain.State) (dom
 
 	if numScores != numAnswers {
 		if mpu.config.RequireAllScores {
-			return state, fmt.Errorf("mismatch between answers (%d) and judge scores (%d)", numAnswers, numScores)
+			err := fmt.Errorf("mismatch between answers (%d) and judge scores (%d)", numAnswers, numScores)
+			span.RecordError(err)
+			return state, err
 		}
 		if numScores < numAnswers {
 			numAnswers = numScores
@@ -174,7 +202,9 @@ func (mpu *MedianPoolUnit) Execute(ctx context.Context, state domain.State) (dom
 
 	winner, aggregateScore, err := mpu.Aggregate(scores, answers[:numAnswers])
 	if err != nil {
-		return state, fmt.Errorf("aggregation failed: %w", err)
+		err := fmt.Errorf("aggregation failed: %w", err)
+		span.RecordError(err)
+		return state, err
 	}
 
 	verdict := domain.Verdict{
@@ -182,6 +212,16 @@ func (mpu *MedianPoolUnit) Execute(ctx context.Context, state domain.State) (dom
 		WinnerAnswer:   &winner,
 		AggregateScore: aggregateScore,
 	}
+
+	latency := time.Since(start)
+	span.SetAttributes(
+		attribute.Int64("eval.latency_ms", latency.Milliseconds()),
+		attribute.Int("eval.answers_count", len(answers)),
+		attribute.Int("eval.judge_scores_count", len(judgeSummaries)),
+		attribute.Float64("eval.aggregate_score", aggregateScore),
+		attribute.String("eval.winner_id", winner.ID),
+		attribute.Bool("no_llm_cost", true), // Deterministic units have no LLM cost
+	)
 
 	return domain.With(state, domain.KeyVerdict, &verdict), nil
 }

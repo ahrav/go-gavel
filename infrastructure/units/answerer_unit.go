@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
@@ -80,6 +83,7 @@ type AnswererUnit struct {
 	config         AnswererConfig
 	llmClient      ports.LLMClient
 	promptTemplate *template.Template
+	tracer         trace.Tracer
 }
 
 // AnswererConfig defines the behavioral parameters for LLM-based answer generation.
@@ -156,6 +160,7 @@ func NewAnswererUnit(
 		config:         config,
 		llmClient:      llmClient,
 		promptTemplate: tmpl,
+		tracer:         otel.Tracer("answerer-unit"),
 	}, nil
 }
 
@@ -191,12 +196,31 @@ func (au *AnswererUnit) Name() string { return au.name }
 //
 // The function is safe for concurrent execution and does not modify input state.
 func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain.State, error) {
+	_, span := au.tracer.Start(ctx, "AnswererUnit.Execute",
+		trace.WithAttributes(
+			attribute.String("unit.type", "answerer"),
+			attribute.String("unit.id", au.name),
+			attribute.Int("config.num_answers", au.config.NumAnswers),
+			attribute.Float64("config.temperature", au.config.Temperature),
+			attribute.Int("config.max_tokens", au.config.MaxTokens),
+			attribute.Int("config.max_concurrency", au.config.MaxConcurrency),
+			attribute.String("config.timeout", au.config.Timeout.String()),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+
 	question, ok := domain.Get(state, domain.KeyQuestion)
 	if !ok {
-		return state, ErrQuestionMissing
+		err := ErrQuestionMissing
+		span.RecordError(err)
+		return state, err
 	}
 	if question == "" {
-		return state, ErrQuestionEmpty
+		err := ErrQuestionEmpty
+		span.RecordError(err)
+		return state, err
 	}
 
 	// Apply timeout to entire answer generation batch.
@@ -208,7 +232,9 @@ func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain
 	// Template is pre-parsed during unit creation for performance.
 	var promptBuf bytes.Buffer
 	if err := au.promptTemplate.Execute(&promptBuf, struct{ Question string }{Question: question}); err != nil {
-		return state, fmt.Errorf("%w: %v", ErrTemplateExecution, err)
+		err := fmt.Errorf("%w: %v", ErrTemplateExecution, err)
+		span.RecordError(err)
+		return state, err
 	}
 	prompt := promptBuf.String()
 
@@ -236,8 +262,17 @@ func (au *AnswererUnit) Execute(ctx context.Context, state domain.State) (domain
 	}
 
 	if err := g.Wait(); err != nil {
-		return state, au.aggregateErrors(err, "answer generation")
+		err := au.aggregateErrors(err, "answer generation")
+		span.RecordError(err)
+		return state, err
 	}
+
+	latency := time.Since(start)
+	span.SetAttributes(
+		attribute.Int64("eval.latency_ms", latency.Milliseconds()),
+		attribute.Int("eval.answers_count", len(answers)),
+		attribute.Int("eval.question_length", len(question)),
+	)
 
 	return domain.With(state, domain.KeyAnswers, answers), nil
 }
@@ -312,6 +347,7 @@ func (au *AnswererUnit) UnmarshalParameters(params yaml.Node) (*AnswererUnit, er
 		config:         config,
 		llmClient:      au.llmClient,
 		promptTemplate: tmpl,
+		tracer:         otel.Tracer("answerer-unit"),
 	}, nil
 }
 
